@@ -1,0 +1,51 @@
+/* Art direction + layout knobs. Numeric fonts are individually replaceable. */
+:root  {
+  --ink: #203c34;
+  --panel: #203e36;
+  --panel-deep: #172f29;
+  --paper: #e9e1c9;
+  --cream: #f4efdf;
+  --gold: #d6b879;
+  --muted: #a5b5a7;
+  --line: #ffffff20;
+  --danger: #c66b58;
+  --selected: #68b8ee;
+  --recipient: #d65c4c;
+  --font-body: 'Segoe UI', sans-serif;
+  --font-heading: Georgia, 'Times New Roman', serif;
+  --font-army: 'Trebuchet MS', sans-serif;
+  --font-hp: 'Segoe UI', sans-serif;
+  --font-gold: Georgia, serif;
+  --font-rate: 'Segoe UI', sans-serif;
+  --font-tier: Georgia, serif;
+  --font-time: Consolas, monospace;
+  --sidebar-width: 280px;
+  --hud-height: 78px;
+  --deck-height: 184px;
+  --button-radius: 4px;
+  --button-height: 38px;
+  --button-font-size: 12px;
+  --node-radius: 29px;
+}
+.stat-army  {
+  font-family: var(--font-army);
+  color: #d9ede4;
+}
+.stat-hp  {
+  font-family: var(--font-hp);
+  color: #a8cdde;
+}
+.stat-gold  {
+  font-family: var(--font-gold);
+  color: var(--gold);
+}
+.stat-rate  {
+  font-family: var(--font-rate);
+  color: #b7c5a6;
+}
+.stat-tier  {
+  font-family: var(--font-tier);
+}
+.stat-time  {
+  font-family: var(--font-time);
+}
