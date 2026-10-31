@@ -4,7 +4,6 @@
 export const BUTTONS = {
   start: { text: 'Raise your banner', icon: 'banner', className: 'primary', ref: 'setup.start' },
   pause: { text: 'Pause', icon: 'pause', ref: 'hud.pause' },
-  routes: { text: 'Commit orders', icon: 'arrow', className: 'primary', ref: 'orders.commit' },
   clear: { text: 'Clear routes', ref: 'orders.clear' },
   research: { text: 'Research', ref: 'magic.research' },
   cast: { text: 'Cast spell', className: 'primary', ref: 'magic.cast' },

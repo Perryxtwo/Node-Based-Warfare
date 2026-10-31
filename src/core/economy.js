@@ -1,7 +1,6 @@
 import { maxHp, upgradeCost, troopDuration, atPeace } from './selectors.js';
 import { UPGRADES } from '../content/upgrades.js';
 import { BALANCE as B } from '../content/balance.js';
-import { dispatch } from './routing.js';
 /** Upgrades change the next cycle, never the snapshot of the active cycle. */
 export function upgrade(g, nodeId, key, owner, free = false) {
   const n = g.nodes[nodeId];
@@ -32,7 +31,6 @@ export function economyStep(g, dt) {
         n.army += n.cyclePower; n.troopElapsed -= n.troopDuration;
         n.troopDuration = troopDuration(g, n); n.cyclePower = UPGRADES.barracks.values[n.tiers.barracks];
         n.troopRunning = peaceful;
-        dispatch(g, n);
       }
     }
   }

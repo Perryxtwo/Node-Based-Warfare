@@ -1,6 +1,6 @@
 import { neighbors } from './selectors.js';
 import { NODE_TYPES } from '../content/node-types.js';
-import { RULES } from '../content/balance.js';
+import { RULES, SEND_PERCENTAGES } from '../content/balance.js';
 export const edgeDuration = (g, a, b) => RULES.edgeSeconds / Math.min(NODE_TYPES[g.nodes[a].type].speed, NODE_TYPES[g.nodes[b].type].speed);
 /** Dijkstra: only friendly interior nodes; endpoint may be hostile. */
 export function findPath(g, from, to, owner) {
@@ -19,20 +19,49 @@ export function findPath(g, from, to, owner) {
 }
 export function commitRoutes(g, nodeId, recipients, owner) {
   const n = g.nodes[nodeId];
-  if (!n || n.owner !== owner) return false;
-  n.routes = [...new Set(recipients)].filter(id => findPath(g, nodeId, id, owner));
-  dispatch(g, n); return true;
+  if (!n || n.owner !== owner || owner === null || g.result) return false;
+  const previous = n.routes, cursor = n.routeCursor;
+  const nextInOrder = [...previous.slice(cursor), ...previous.slice(0, cursor)].map(r => r.to);
+  const routes = [];
+  for (const recipient of recipients) {
+    const { to, percent = 100 } = typeof recipient === 'number' ? { to: recipient } : recipient;
+    if (!SEND_PERCENTAGES.includes(percent) || routes.some(r => r.to === to)) continue;
+    const existing = previous.find(r => r.to === to);
+    if (!existing && !findPath(g, nodeId, to, owner)) continue;
+    routes.push({ to, percent, nextSend: existing?.percent === percent ? existing.nextSend : g.time + RULES.orderDelay });
+  }
+  n.routes = routes;
+  const next = nextInOrder.find(to => routes.some(r => r.to === to));
+  n.routeCursor = Math.max(0, routes.findIndex(r => r.to === next));
+  return true;
 }
-/** Integer shares with rotating remainder; fractional spell power stays at home. */
-export function dispatch(g, n) {
-  const paths = n.routes.map(id => findPath(g, n.id, id, n.owner)).filter(Boolean);
-  const power = Math.floor(n.army + 1e-9);
-  if (!paths.length || !power) return;
-  const base = Math.floor(power / paths.length), remainder = power % paths.length;
-  paths.forEach((path, i) => {
-    const extra = (i - n.rotation + paths.length) % paths.length < remainder ? 1 : 0;
-    const amount = base + extra;
-    if (amount) g.waves.push({ id: g.nextWave++, owner: n.owner, power: amount, path, leg: 0, elapsed: 0, duration: edgeDuration(g, path[0], path[1]), created: g.time });
-  });
-  n.rotation = (n.rotation + remainder) % paths.length; n.army -= power;
+function send(g, n, path, percent) {
+  const power = Math.floor(n.army * percent / 100);
+  if (power < 1) return false;
+  g.waves.push({ id: g.nextWave++, owner: n.owner, power, path, leg: 0, elapsed: 0, duration: edgeDuration(g, path[0], path[1]), created: g.time });
+  n.army -= power;
+  return true;
+}
+/** A manual send leaves recurring orders, percentages and clocks untouched. */
+export function sendOnce(g, nodeId, to, percent, owner) {
+  const n = g.nodes[nodeId];
+  if (!n || n.owner !== owner || owner === null || g.result || !SEND_PERCENTAGES.includes(percent)) return false;
+  const path = findPath(g, nodeId, to, owner);
+  return path ? send(g, n, path, percent) : false;
+}
+/** Recipients take turns, using the army available at that instant. Zero holds the turn. */
+export function ordersStep(g) {
+  for (const n of g.nodes) {
+    if (n.owner === null) continue;
+    for (let checked = 0; checked < n.routes.length; checked++) {
+      const route = n.routes[n.routeCursor];
+      if (g.time + 1e-8 < route.nextSend) { n.routeCursor = (n.routeCursor + 1) % n.routes.length; continue; }
+      const path = findPath(g, n.id, route.to, n.owner);
+      // Temporarily unreachable recipients keep their order, but cannot block reachable ones.
+      if (!path) { n.routeCursor = (n.routeCursor + 1) % n.routes.length; continue; }
+      if (!send(g, n, path, route.percent)) break;
+      route.nextSend = g.time + RULES.sendSeconds;
+      n.routeCursor = (n.routeCursor + 1) % n.routes.length;
+    }
+  }
 }

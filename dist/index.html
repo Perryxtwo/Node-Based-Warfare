@@ -482,6 +482,7 @@ i {
 }
 .map-heading {
   display:flex;
+  flex-wrap:wrap;
   align-items:center;
   gap:25px;
   padding:25px 30px 8px
@@ -511,6 +512,50 @@ i {
   min-height:28px;
   padding:3px 8px
 }
+.send-meter {
+  min-width:180px;
+  margin-left:auto
+}
+.meter-label {
+  display:block;
+  font-size:8px;
+  font-weight:600;
+  letter-spacing:1.3px;
+  color:#65755b;
+  margin-bottom:5px
+}
+.meter-notches {
+  display:flex;
+  border:1px solid #7d8b6b80;
+  border-radius:4px;
+  overflow:hidden;
+  background:#f5f0e1
+}
+.meter-notches button {
+  flex:1;
+  min-height:30px;
+  padding:5px 8px;
+  font-size:10px;
+  border:0;
+  border-right:1px solid #7d8b6b50;
+  border-radius:0;
+  color:var(--ink)
+}
+.meter-notches button:last-child { border-right:0 }
+.meter-notches button[aria-pressed=true] {
+  background:#315e48;
+  color:var(--cream);
+  box-shadow:inset 0 -3px 0 var(--gold)
+}
+.meter-notches button:focus-visible { outline-offset:-3px }
+.recipient-list {
+  padding-left:22px;
+  font-size:11px;
+  line-height:1.8;
+  color:var(--muted);
+  margin:0 0 12px
+}
+.recipient-list strong { float:right; color:var(--gold); font-weight:500 }
 .map-wrap {
   position:relative;
   flex:1;
@@ -588,6 +633,22 @@ i {
 .map-node.spell-target .selection-ring {
   stroke:#a583cd;
   stroke-width:3
+}
+.map-node.drop-target .target-ring { stroke:#315e48; stroke-width:4 }
+.drag-order { pointer-events:none }
+.drag-order path {
+  stroke:#315e48;
+  stroke-width:3;
+  stroke-dasharray:7 4;
+  vector-effect:non-scaling-stroke;
+  fill:none
+}
+.drag-order text {
+  font:600 16px var(--font-army);
+  fill:var(--ink);
+  paint-order:stroke;
+  stroke:var(--cream);
+  stroke-width:4px
 }
 .map-node:hover .node-disc {
   fill:#fff8e5;
@@ -1168,21 +1229,26 @@ select,input {
   min-height:22px;
   padding:3px 7px
 }
-.context-menu {
+.upgrade-menu {
   position:absolute;
+  top:12px;
+  right:12px;
   z-index:5;
   background:var(--panel);
   color:var(--cream);
   padding:12px;
-  width:255px;
+  width:min(255px,calc(100% - 24px));
+  max-height:calc(100% - 24px);
+  overflow:auto;
   box-shadow:0 12px 35px #253c3950;
   border:1px solid var(--gold);
   border-radius:4px
 }
-.context-menu .section-label {
+.upgrade-menu .section-label {
   margin-bottom:7px
 }
-.context-menu[hidden] {
+.upgrade-menu>small { display:block; margin-bottom:10px; color:var(--gold) }
+.upgrade-menu[hidden] {
   display:none
 }
 #toast {
@@ -1375,6 +1441,7 @@ select,input {
   .zoom {
     margin-left:auto
   }
+  .send-meter { min-width:160px }
   .map-instructions {
     font-size:9px;
     flex-wrap:wrap;
@@ -1509,6 +1576,7 @@ select,input {
   .map-heading {
     padding:15px 8px 0
   }
+  .send-meter { order:3; width:100%; margin:0 0 7px }
   .zoom button {
     padding:2px 6px
   }
@@ -1633,11 +1701,11 @@ const cache = {};
 const modules={"src/main.js":function(require){
 const { createGame } = require("src/core/state.js");
 const { step } = require("src/core/engine.js");
-const { commitRoutes, findPath } = require("src/core/routing.js");
+const { commitRoutes, findPath, sendOnce } = require("src/core/routing.js");
 const { upgrade } = require("src/core/economy.js");
 const { research, cast, validTargets } = require("src/core/spells.js");
 const { totals } = require("src/core/selectors.js");
-const { RULES } = require("src/content/balance.js");
+const { RULES, SEND_PERCENTAGES } = require("src/content/balance.js");
 const { FACTIONS } = require("src/content/factions.js");
 const { SPELLS } = require("src/content/spells.js");
 const { ASSETS, asset, saveAsset } = require("src/ui/assets.js");
@@ -1646,17 +1714,17 @@ const { renderInto } = require("src/ui/dom.js");
 const { dissolveCard } = require("src/ui/feedback.js");
 const { setupView, botOptions } = require("src/ui/setup.js");
 const { battlefieldView, terrain } = require("src/ui/battlefield.js");
-const { shell, hud, nodePanel, rivals, spellCards, dispatches, upgrades } = require("src/ui/panels.js");
+const { shell, hud, nodePanel, rivals, spellCards, dispatches, upgrades, sendMeter } = require("src/ui/panels.js");
 
 let config = { mode: 'conquest', faction: 'elves', bots: [{ faction: 'dwarves', difficulty: 'normal' }], nodesPerPlayer: 12, seed: 'Alderwatch' };
 let g, paused = true, started = false, resultShown = false, toastTimer;
-const ui = { selected: new Set(), drafts: {}, focus: null, spell: null, targets: [], preview: null, inspecting: false, routeMode: false, zoom: 1, cx: 0, cy: 0, context: null, terrain: '' };
+const ui = { selected: new Set(), focus: null, percent: 100, dragOrder: null, spell: null, targets: [], preview: null, inspecting: false, routeMode: false, zoom: 1, cx: 0, cy: 0, terrain: '' };
 const $ = selector => document.querySelector(selector);
 const modal = $('#modal');
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 3000); }
 function initialize() {
   g = createGame(config); paused = true; resultShown = false;
-  Object.assign(ui, { selected: new Set(), drafts: {}, focus: g.nodes.find(n => n.owner === 0).id, spell: null, targets: [], zoom: 1, cx: g.width / 2, cy: g.height / 2, context: null, terrain: terrain(g) });
+  Object.assign(ui, { selected: new Set(), focus: g.nodes.find(n => n.owner === 0).id, percent: 100, dragOrder: null, spell: null, targets: [], routeMode: false, zoom: 1, cx: g.width / 2, cy: g.height / 2, terrain: terrain(g) });
   $('#app').innerHTML = shell(g);
   // On a narrow viewport, start near the player's keep at a readable scale.
   const mapWidth = $('#map-wrap').getBoundingClientRect().width;
@@ -1674,25 +1742,28 @@ function readSetup() {
 }
 function closeModal() { $('#app').inert = false; modal.hidden = true; modal.innerHTML = ''; ui.preview = null; }
 function dialog(title, body, cls = '') { paused = true; modal.hidden = false; $('#app').inert = true; modal.innerHTML = `<section class="dialog ${cls}" role="dialog" aria-modal="true" aria-label="${escape(title)}"><header><h2>${title}</h2><button data-action="close-modal" aria-label="Close dialog" data-ui="dialog.close">×</button></header>${body}</section>`; modal.querySelector('button')?.focus(); }
-function deselect(id) {
-  if (!ui.selected.has(id)) return;
-  commitRoutes(g, id, ui.drafts[id] || [], 0); ui.selected.delete(id); delete ui.drafts[id];
-}
-function commitAll() { [...ui.selected].forEach(deselect); ui.context = null; }
+function clearSelection() { ui.selected.clear(); }
 function selectNode(id, shift) {
-  if (ui.selected.has(id)) { deselect(id); return; }
-  if (!shift) commitAll();
-  ui.selected.add(id); ui.drafts[id] = [...g.nodes[id].routes];
+  if (ui.selected.has(id)) { ui.selected.delete(id); ui.focus = [...ui.selected].at(-1) ?? id; return; }
+  if (!shift) clearSelection();
+  ui.selected.add(id); ui.focus = id;
 }
 function toggleRecipient(id, clear) {
   if (!ui.selected.size) return;
   let valid = false;
   for (const from of ui.selected) {
-    if (clear) { ui.drafts[from] = []; valid = true; continue; }
-    if (!findPath(g, from, id, 0)) continue;
-    const routes = ui.drafts[from]; ui.drafts[from] = routes.includes(id) ? routes.filter(n=>n!==id) : [...routes,id]; valid=true;
+    const routes = g.nodes[from].routes, existing = routes.some(r => r.to === id);
+    if (clear) { if (existing) { commitRoutes(g, from, [], 0); valid = true; } continue; }
+    if (!existing && !findPath(g, from, id, 0)) continue;
+    commitRoutes(g, from, existing ? routes.filter(r => r.to !== id) : [...routes, { to: id, percent: ui.percent }], 0);
+    valid = true;
   }
   if (!valid) toast('Reach this node through your own territory first.');
+}
+function adjustPercent(direction) {
+  const index = SEND_PERCENTAGES.indexOf(ui.percent);
+  ui.percent = SEND_PERCENTAGES[Math.max(0, Math.min(SEND_PERCENTAGES.length - 1, index + direction))];
+  refresh();
 }
 function targetNode(id, right, shift) {
   const n=g.nodes[id], s=SPELLS[ui.spell];
@@ -1707,18 +1778,17 @@ function targetNode(id, right, shift) {
 function nodeClick(e, id, right=false) {
   if (ui.spell) { targetNode(id,right,e.shiftKey);refresh();return; }
   const n=g.nodes[id];
-  if (right && ui.selected.size && !ui.selected.has(id) || !right && ui.routeMode && ui.selected.size && !ui.selected.has(id)) toggleRecipient(id,e.shiftKey);
-  else if (right && n.owner===0) {
-    ui.focus=id; const rect=$('#map-wrap').getBoundingClientRect();
-    ui.context={id,x:Math.max(0,Math.min(e.clientX-rect.left+10,rect.width-260)),y:Math.max(0,Math.min(e.clientY-rect.top,rect.height-230))};
-  } else if (!right) { ui.focus=id;ui.context=null;if(n.owner===0)selectNode(id,e.shiftKey); }
+  if (right && ui.selected.size || !right && ui.routeMode && ui.selected.size && !ui.selected.has(id)) toggleRecipient(id,e.shiftKey);
+  else if (!right) { ui.focus=id;if(n.owner===0)selectNode(id,e.shiftKey);else clearSelection(); }
   refresh();
 }
 function refresh() {
-  for (const id of [...ui.selected]) if(g.nodes[id].owner!==0){ui.selected.delete(id);delete ui.drafts[id];}
+  for (const id of [...ui.selected]) if(g.nodes[id].owner!==0)ui.selected.delete(id);
+  if (ui.selected.size && !ui.selected.has(ui.focus)) ui.focus = [...ui.selected].at(-1);
   renderInto($('#hud-stats'),hud(g)); $('#game-clock').textContent=clock(g.time);
   const pause=$('[data-action="pause"]'); if(pause)pause.innerHTML=icon('pause')+(paused?'Resume':'Pause');
   renderInto($('#node-panel'),nodePanel(g,ui)); renderInto($('#rivals'),rivals(g)); renderInto($('#spell-cards'),spellCards(g)); renderInto($('#dispatches'),dispatches(g));
+  renderInto($('#send-meter'),sendMeter(ui.percent));
   const svg=$('#battlefield'); svg.setAttribute('viewBox',`${ui.cx-g.width/ui.zoom/2} ${ui.cy-g.height/ui.zoom/2} ${g.width/ui.zoom} ${g.height/ui.zoom}`);
   // Parse SVG through an SVG wrapper to retain the correct namespace.
   const wrapper=document.createElement('div');renderInto(wrapper,`<svg xmlns="http://www.w3.org/2000/svg">${battlefieldView(g,ui)}</svg>`);
@@ -1727,16 +1797,17 @@ function refresh() {
   if(ui.spell) {
     const s=SPELLS[ui.spell];
     renderInto($('#map-instructions'),`<strong>${s.name}</strong><span>${targetInstruction(s.target)}</span>${button('cast',{disabled:!validTargets(g,0,s.id,ui.targets)})}<button data-action="cancel-spell" data-ui="magic.cancel">Cancel</button>`);
-  } else renderInto($('#map-instructions'),`<span><strong>Left click</strong> select</span><span>·</span><span><strong>Shift + click</strong> multi-select</span><span>·</span><span><strong>Right click</strong> route / upgrade</span><span>·</span><span><strong>Enter</strong> commit</span>`);
-  const menu=$('#context-menu');menu.hidden=!ui.context;
-  if(ui.context){const n=g.nodes[ui.context.id];if(n.owner!==0){ui.context=null;menu.hidden=true;}else{menu.style.left=ui.context.x+'px';menu.style.top=ui.context.y+'px';renderInto(menu,`<div class="section-label">${escape(n.name)}</div>${upgrades(g,n)}`);}}
+  } else renderInto($('#map-instructions'),`<span><strong>Drag</strong> send once</span><span>·</span><span><strong>Right click</strong> toggle recipient</span><span>·</span><span><strong>Wheel / ↑ ↓</strong> army %</span><span>·</span><span><strong>Shift + click</strong> multi-select</span>`);
+  const menu=$('#upgrade-menu'), n=g.nodes[ui.focus];
+  menu.hidden=!ui.selected.size || n?.owner!==0 || Boolean(ui.spell || ui.dragOrder);
+  if(!menu.hidden)renderInto(menu,`<div class="section-label">${n.label} · ${escape(n.name)}</div><small>${n.king!==null?'50% king discount':'DEVELOP STRONGHOLD'}</small>${upgrades(g,n)}`);
 }
 // SVG updates preserve focus and pointer targets just like the HTML reconciler.
 function renderSvg(old,fresh){
   for(let i=0;i<fresh.childNodes.length;i++){const n=fresh.childNodes[i],o=old.childNodes[i];if(!o){old.append(n.cloneNode(true));continue;}if(n.nodeName!==o.nodeName){o.replaceWith(n.cloneNode(true));continue;}if(n.nodeType===3){if(o.textContent!==n.textContent)o.textContent=n.textContent;continue;}if(n.nodeType!==1)continue;for(const a of [...o.attributes])if(!n.hasAttribute(a.name))o.removeAttribute(a.name);for(const a of n.attributes)if(o.getAttribute(a.name)!==a.value)o.setAttribute(a.name,a.value);renderSvg(o,n);}while(old.childNodes.length>fresh.childNodes.length)old.lastChild.remove();
 }
 function targetInstruction(type){return {own:'Left-click a friendly node.',enemy:'Right-click an enemy node.',twoOwn:'Left-click source, then destination.',twoAny:'Choose two occupied nodes: left for yours, right for enemies.',mixed:'Left-click your source; right-click an enemy.',allOwn:'All your nodes selected; left-click to exclude.',none:'Confirm to cast.'}[type];}
-function help(){dialog('The field guide',`<p>Grow your economy, raise an army, and send it across the frontier. Your rivals have the same resources and rules.</p><h3>Orders without the clutter</h3><ul><li>Left-click your node to select it. Hold Shift to select more.</li><li>Right-click destinations to toggle routes. Red rings show recipients shared by all selected sources.</li><li>Click empty land, deselect the source, or press Enter to commit. All stationed troops leave immediately; future production follows.</li><li>While editing orders, existing routes keep running. Shift-right-click a recipient clears the drafts.</li><li>Right-click a selected friendly node to open upgrades, or use the permanent command panel.</li><li>On touch devices, select a source, enable tap-to-route, tap destinations, then Commit orders.</li></ul><h3>Gold, steel & spellcraft</h3><p>Gold is earned in independent node cycles. Army power absorbs attacks before walls. Surplus attackers capture a node and inherit its upgrades. Damage stops regeneration and pauses research for five seconds; a troop already being trained still finishes.</p><p>Upgrade barracks to research your faction’s spells. Click a ready card, review it, choose targets, then confirm the cast. Vacant nodes are never spell targets. A barracks can handle one research job at a time.</p><h3>Field controls</h3><p>Space: pause/resume · Enter: commit routes · Escape: cancel spell or commit/deselect · F2: element references. Zoom with +/−/Fit; drag empty land to pan when zoomed.</p><p>Dialogs pause battle. Use Resume when you are ready. WIP balance values are provisional. Refer to <a href="./docs/IMPLEMENTATION_PLAN.md" target="_blank">the implementation plan</a> for decisions.</p>`);}
+function help(){dialog('The field guide',`<p>Grow your economy, raise an army, and send it across the frontier. Your rivals have the same resources and rules.</p><h3>Marching orders</h3><ul><li>Set the army meter to 25%, 50%, 75% or 100%. Use the mouse wheel over the map, ↑ / ↓, or click a notch.</li><li>Hold and drag from your node to a reachable node to send that percentage once, rounded down. A drop that cannot send a whole point leaves your army in place.</li><li>Left-click your node to select it and open upgrades on the right. Hold Shift to select more sources.</li><li>Right-click a destination to add a recurring recipient using the meter percentage at that moment. Right-click it again to remove it; Shift-right-click a recipient clears that source’s orders.</li><li>The first request is ready after one second. Each recipient waits three seconds after its successful send before requesting again. Due recipients take turns in selection order, using the army available at their turn; a request that rounds to zero waits until it can send a whole point.</li><li>Changing the meter affects new orders. To change an existing recipient’s percentage, remove it and add it again. Orders keep running when you deselect the source.</li><li>Red rings show recipients shared by selected sources. The marching orders list shows their order and saved percentages.</li><li>On touch devices, drag to send once, or enable tap-to-route and tap destinations for recurring orders.</li></ul><h3>Gold, steel & spellcraft</h3><p>Gold is earned in independent node cycles. Army power absorbs attacks before walls. Surplus attackers capture a node and inherit its upgrades. Damage stops regeneration and pauses research for five seconds; a troop already being trained still finishes.</p><p>Upgrade barracks to research your faction’s spells. Click a ready card, review it, choose targets, then confirm the cast. Vacant nodes are never spell targets. A barracks can handle one research job at a time.</p><h3>Field controls</h3><p>Space: pause/resume · ↑ / ↓: army percentage · Enter on a focused node: select · Escape: cancel drag/spell or deselect · F2: element references. Zoom with +/−/Fit; drag empty land to pan when zoomed.</p><p>Dialogs pause battle. Use Resume when you are ready. WIP balance values are provisional. Refer to <a href="./docs/IMPLEMENTATION_PLAN.md" target="_blank">the implementation plan</a> for decisions.</p>`);}
 function artWorkshop(){dialog('Art workshop',`<p>Upload PNG, WebP, JPEG or SVG artwork to replace any sprite. Changes are stored in this browser. For permanent project artwork, replace the matching file in <code>assets/</code> or edit <code>src/ui/assets.js</code>.</p><div class="asset-grid">${Object.keys(ASSETS).map(id=>`<div class="asset-slot">${icon(id)}<strong>${id}</strong><label>Upload image<input type="file" accept="image/png,image/webp,image/jpeg,image/svg+xml" data-asset="${id}" data-ui="art.upload.${id}"></label><button data-action="reset-art:${id}" data-ui="art.reset.${id}">Reset</button></div>`).join('')}</div>`);}
 function toggleInspect(){ui.inspecting=!ui.inspecting;document.body.classList.toggle('inspecting',ui.inspecting);$('#reference').hidden=!ui.inspecting;$('#reference').textContent='F2 references · Hover an element, then click to copy its ID.';toast(ui.inspecting?'Reference mode on. Click an element to copy its ID.':'Reference mode off.');}
 function action(value){
@@ -1746,13 +1817,13 @@ function action(value){
     case 'pause':paused=!paused;break;
     case 'new':showSetup();break;
     case 'close-modal':closeModal();break;
-    case 'routes':commitAll();toast('Orders committed.');break;
-    case 'clear':for(const n of ui.selected)ui.drafts[n]=[];break;
+    case 'clear':for(const n of ui.selected)commitRoutes(g,n,[],0);break;
+    case 'send-percent':if(SEND_PERCENTAGES.includes(Number(id)))ui.percent=Number(id);break;
     case 'route-mode':ui.routeMode=!ui.routeMode;break;
     case 'upgrade':if(!upgrade(g,Number(id),key,0))toast('This upgrade is unavailable.');break;
     case 'research':if(research(g,0,id))toast(`${SPELLS[id].name} research started.`);else toast('An eligible free barracks and enough gold are required.');break;
     case 'preview':ui.preview=id;{const s=SPELLS[id];modal.hidden=false;$('#app').inert=true;modal.innerHTML=`<section class="dialog spell-preview" role="dialog" aria-modal="true" aria-label="${s.name}"><header><span class="eyebrow">TIER ${s.tier} · ${FACTIONS[s.faction].name.toUpperCase()}</span><button data-action="close-modal" aria-label="Close spell">×</button></header>${icon(s.icon)}<h2>${s.name}</h2><p>${s.description}</p><small>The battle continues while you prepare your spell.</small><button class="primary" data-action="arm:${id}" data-ui="magic.choose-targets">${s.target==='none'?'Cast spell':'Choose targets'}</button></section>`;}break;
-    case 'arm':closeModal();commitAll();ui.spell=id;ui.targets=SPELLS[id].target==='allOwn'?g.nodes.filter(n=>n.owner===0).map(n=>n.id):[];if(SPELLS[id].target==='none')action('cast');break;
+    case 'arm':closeModal();clearSelection();ui.spell=id;ui.targets=SPELLS[id].target==='allOwn'?g.nodes.filter(n=>n.owner===0).map(n=>n.id):[];if(SPELLS[id].target==='none')action('cast');break;
     case 'cast':if(cast(g,0,ui.spell,ui.targets)){dissolveCard(ui.spell);toast(`${SPELLS[ui.spell].name} cast.`);ui.spell=null;ui.targets=[];}else toast('Choose valid targets first.');break;
     case 'cancel-spell':ui.spell=null;ui.targets=[];break;
     case 'help':help();break;
@@ -1767,13 +1838,14 @@ function action(value){
   refresh();
 }
 document.addEventListener('click',e=>{
+  if(dragMoved && e.detail>0){e.preventDefault();return;}
   if(ui.inspecting && e.target.closest('[data-action]')?.dataset.action !== 'inspect'){const target=e.target.closest('[data-ui]');if(target){e.preventDefault();e.stopPropagation();const ref=target.dataset.ui;navigator.clipboard?.writeText(ref).then(()=>toast(`Copied ${ref}`)).catch(()=>toast(ref));$('#reference').textContent=ref;}return;}
   const control=e.target.closest('[data-action]');if(control){action(control.dataset.action);return;}
   const node=e.target.closest('[data-node]');if(node){nodeClick(e,Number(node.dataset.node));return;}
-  if(e.target.closest('#battlefield')&&!dragMoved){if(ui.spell)action('cancel-spell');else commitAll();ui.context=null;refresh();}
+  if(e.target.closest('#battlefield')){if(ui.spell)action('cancel-spell');else clearSelection();refresh();}
 });
 document.addEventListener('contextmenu',e=>{
-  if(!e.target.closest('#map-wrap'))return;e.preventDefault();const node=e.target.closest('[data-node]');if(node)nodeClick(e,Number(node.dataset.node),true);else{commitAll();ui.context=null;if(ui.spell)action('cancel-spell');refresh();}
+  if(!e.target.closest('#battlefield'))return;e.preventDefault();const node=e.target.closest('[data-node]');if(node)nodeClick(e,Number(node.dataset.node),true);else{clearSelection();if(ui.spell)action('cancel-spell');refresh();}
 });
 document.addEventListener('change',e=>{
   if(e.target.name==='botCount'){config=readSetup();renderInto($('#bot-options'),botOptions(config.bots));}
@@ -1782,18 +1854,66 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='F2'){e.preventDefault();toggleInspect();return;}
-  if(e.target.matches('input,select,textarea'))return;
-  if(e.key==='Escape'){if(!modal.hidden){if(!$('#setup-form'))closeModal();}else if(ui.spell)action('cancel-spell');else{commitAll();ui.context=null;}refresh();}
+  if(e.target.matches('input,select,textarea') || e.target.isContentEditable)return;
+  if(e.key==='Escape'){cancelDrag();if(!modal.hidden){if(!$('#setup-form'))closeModal();}else if(ui.spell)action('cancel-spell');else clearSelection();refresh();}
   if(!modal.hidden)return;
-  if(e.code==='Space'){e.preventDefault();action('pause');}
-  if(e.key==='Enter'){e.preventDefault();const n=e.target.closest('[data-node]');if(n)nodeClick(e,Number(n.dataset.node));else action('routes');}
+  if(e.key==='ArrowUp' || e.key==='ArrowDown'){e.preventDefault();adjustPercent(e.key==='ArrowUp'?1:-1);return;}
+  if(e.code==='Space' && !e.target.closest('button')){e.preventDefault();action('pause');}
+  if(e.key==='Enter'){const n=e.target.closest('[data-node]');if(n){e.preventDefault();nodeClick(e,Number(n.dataset.node));}}
 });
+document.addEventListener('wheel',e=>{
+  if(!modal.hidden || ui.inspecting || e.ctrlKey || !e.deltaY || !e.target.closest('.map-heading, #map-wrap') || e.target.closest('#upgrade-menu'))return;
+  e.preventDefault();adjustPercent(e.deltaY<0?1:-1);
+},{passive:false});
 document.addEventListener('pointermove',e=>{if(ui.inspecting){const t=e.target.closest('[data-ui]');if(t)$('#reference').textContent=`${t.dataset.ui} · click to copy`;}});
 let drag=null,dragMoved=false;
-document.addEventListener('pointerdown',e=>{dragMoved=false;if(ui.zoom>1&&e.button===0&&e.target.closest('#battlefield')&&!e.target.closest('[data-node]'))drag={x:e.clientX,y:e.clientY,cx:ui.cx,cy:ui.cy};});
-document.addEventListener('pointermove',e=>{if(!drag)return;const rect=$('#battlefield').getBoundingClientRect();if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)dragMoved=true;ui.cx=Math.max(0,Math.min(g.width,drag.cx-(e.clientX-drag.x)*g.width/ui.zoom/rect.width));ui.cy=Math.max(0,Math.min(g.height,drag.cy-(e.clientY-drag.y)*g.height/ui.zoom/rect.height));});
-document.addEventListener('pointerup',()=>{drag=null;});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&started){paused=true;refresh();}});
+function cancelDrag(){drag=null;ui.dragOrder=null;}
+document.addEventListener('dragstart',e=>{if(e.target.closest('#battlefield'))e.preventDefault();});
+document.addEventListener('pointerdown',e=>{
+  dragMoved=false;
+  if(e.button!==0 || !modal.hidden || ui.inspecting || ui.spell || g.result || !e.target.closest('#battlefield'))return;
+  const node=e.target.closest('[data-node]'), from=node?Number(node.dataset.node):null;
+  if(from!==null && g.nodes[from].owner===0 && !ui.routeMode)drag={kind:'troops',from,x:e.clientX,y:e.clientY,pointer:e.pointerId};
+  else if(!node && ui.zoom>1)drag={kind:'pan',x:e.clientX,y:e.clientY,cx:ui.cx,cy:ui.cy,pointer:e.pointerId};
+});
+document.addEventListener('pointermove',e=>{
+  if(!drag || e.pointerId!==drag.pointer)return;
+  if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>5)dragMoved=true;
+  if(!dragMoved)return;
+  const svg=$('#battlefield');
+  if(!svg.hasPointerCapture(e.pointerId))svg.setPointerCapture(e.pointerId);
+  if(drag.kind==='pan'){
+    const rect=svg.getBoundingClientRect();
+    ui.cx=Math.max(0,Math.min(g.width,drag.cx-(e.clientX-drag.x)*g.width/ui.zoom/rect.width));
+    ui.cy=Math.max(0,Math.min(g.height,drag.cy-(e.clientY-drag.y)*g.height/ui.zoom/rect.height));
+  }else{
+    if(g.nodes[drag.from].owner!==0){cancelDrag();refresh();return;}
+    if(!ui.selected.has(drag.from)){clearSelection();ui.selected.add(drag.from);}
+    ui.focus=drag.from;
+    const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;
+    const point=p.matrixTransform(svg.getScreenCTM().inverse());
+    const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-node]');
+    const to=target?Number(target.dataset.node):null;
+    ui.dragOrder={from:drag.from,to:to!==null&&findPath(g,drag.from,to,0)?to:null,x:point.x,y:point.y};
+  }
+  refresh();
+});
+document.addEventListener('pointerup',e=>{
+  if(!drag || e.pointerId!==drag.pointer)return;
+  const ended=drag;cancelDrag();
+  if(dragMoved && ended.kind==='troops' && modal.hidden && !ui.spell){
+    const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-node]');
+    const to=target?Number(target.dataset.node):null;
+    if(to!==null && to!==ended.from){
+      if(!findPath(g,ended.from,to,0))toast('Reach this node through your own territory first.');
+      else if(!sendOnce(g,ended.from,to,ui.percent,0))toast('Not enough army power for a whole troop at this percentage.');
+    }
+  }
+  refresh();
+});
+document.addEventListener('pointercancel',()=>{cancelDrag();dragMoved=true;refresh();});
+window.addEventListener('blur',()=>{cancelDrag();dragMoved=true;});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&started){cancelDrag();paused=true;refresh();}});
 let last=performance.now(),accumulator=0,lastRender=0;
 function frame(now){
   const dt=Math.min(.25,(now-last)/1000);last=now;
@@ -1828,7 +1948,7 @@ return {createGame,event};
 },
 "src/core/map.js":function(require){
 const { random } = require("src/core/random.js");
-const { BALANCE : B } = require("src/content/balance.js");
+const { BALANCE : B, RULES } = require("src/content/balance.js");
 const { UPGRADES } = require("src/content/upgrades.js");
 const names = ['Alderwatch', 'Briar Hollow', 'Stoneford', 'Thornfield', 'Ashen Mill', 'Oakrest', 'Windmere', 'Highfell', 'Greybridge', 'Foxglove', 'Ember Hill', 'Westhaven', 'Dawnreach', 'Ironwood', 'Mossgate', 'Redbrook', 'Kingsfall', 'Silverfen', 'Rookwell', 'Fallowmere'];
 /** Irregular grid guarantees connected, readable, bounded-degree maps. */
@@ -1839,7 +1959,7 @@ function generateMap(players, perPlayer, seed) {
     id: i, label: `N${String(i + 1).padStart(2, '0')}`, name: names[i % names.length],
     x: 100 + (i % cols) * 170 + (rng() - .5) * 35, y: 110 + Math.floor(i / cols) * 160 + (rng() - .5) * 38,
     type: 'regular', owner: null, king: null, tiers: { gold: 1, barracks: 0, hp: 1 }, hp: 0, army: 0,
-    routes: [], rotation: 0, goldElapsed: 0, goldDuration: 3, troopElapsed: 0, troopDuration: 2,
+    routes: [], routeCursor: 0, goldElapsed: 0, goldDuration: UPGRADES.gold.values[1], troopElapsed: 0, troopDuration: RULES.troopSeconds,
     cyclePower: 1, troopRunning: false, lastDamage: -100, effects: {},
   }));
   const edges = [];
@@ -1891,13 +2011,14 @@ const BALANCE = {
   illusionSeconds: 12, mineBonus: .3, gearBonus: .35, hasteSpeed: 1.4, hasteSeconds: 10,
   neutralBase: 2, neutralDistance: 2, neutralUpgrade: 2,
 };
-const RULES = { tick: .05, troopSeconds: 2, edgeSeconds: 1.34, peaceSeconds: 5, captureHpPerTier: 3 };
+const SEND_PERCENTAGES = [25, 50, 75, 100];
+const RULES = { tick: .05, troopSeconds: 5, edgeSeconds: 5, orderDelay: 1, sendSeconds: 3, peaceSeconds: 5, captureHpPerTier: 3 };
 
-return {BALANCE,RULES};
+return {BALANCE,SEND_PERCENTAGES,RULES};
 },
 "src/content/upgrades.js":function(require){
 const UPGRADES = {
-  gold: { label: 'Goldworks', subtitle: 'A stronger economy', icon: 'gold', min: 1, max: 5, costs: [4, 7, 15, 35], values: [0, 3, 2.5, 2, 1.5, 1], unit: 'seconds / gold' },
+  gold: { label: 'Goldworks', subtitle: 'A stronger economy', icon: 'gold', min: 1, max: 5, costs: [4, 7, 15, 35], values: [0, 5, 4.5, 4, 3.5, 3], unit: 'seconds / gold' },
   barracks: { label: 'Barracks', subtitle: 'Raise your banners', icon: 'sword', min: 0, max: 5, costs: [3, 7, 9, 17, 35], values: [0, 1, 3, 5, 10, 19], unit: 'power / cycle' },
   hp: { label: 'Ramparts', subtitle: 'Hold the line', icon: 'shield', min: 1, max: 5, costs: [5, 16, 20, 35], values: [0, 5, 10, 20, 35, 55], unit: 'base health' },
 };
@@ -1919,7 +2040,7 @@ return {FACTIONS,PLAYER_COLORS};
 const { economyStep } = require("src/core/economy.js");
 const { researchStep } = require("src/core/spells.js");
 const { arrive, checkVictory } = require("src/core/combat.js");
-const { edgeDuration, dispatch } = require("src/core/routing.js");
+const { edgeDuration, ordersStep } = require("src/core/routing.js");
 const { aiStep } = require("src/core/ai.js");
 /** Pure simulation entry point: no DOM, wall clock, network or storage. */
 function step(g, dt, bots = true) {
@@ -1931,10 +2052,10 @@ function step(g, dt, bots = true) {
     const next = g.nodes[w.path[w.leg + 1]];
     if (next.owner !== w.owner || w.leg + 1 === w.path.length - 1) {
       arrive(g, next, w.owner, w.power); g.waves = g.waves.filter(x => x.id !== w.id);
-      if (next.owner === w.owner) dispatch(g, next);
     } else { w.elapsed -= w.duration; w.leg++; w.duration = edgeDuration(g, w.path[w.leg], w.path[w.leg + 1]); }
   }
-  researchStep(g, dt); checkVictory(g); if (bots && !g.result) aiStep(g);
+  researchStep(g, dt); checkVictory(g);
+  if (!g.result) { ordersStep(g); if (bots) aiStep(g); }
 }
 
 return {step};
@@ -1943,7 +2064,6 @@ return {step};
 const { maxHp, upgradeCost, troopDuration, atPeace } = require("src/core/selectors.js");
 const { UPGRADES } = require("src/content/upgrades.js");
 const { BALANCE : B } = require("src/content/balance.js");
-const { dispatch } = require("src/core/routing.js");
 /** Upgrades change the next cycle, never the snapshot of the active cycle. */
 function upgrade(g, nodeId, key, owner, free = false) {
   const n = g.nodes[nodeId];
@@ -1974,7 +2094,6 @@ function economyStep(g, dt) {
         n.army += n.cyclePower; n.troopElapsed -= n.troopDuration;
         n.troopDuration = troopDuration(g, n); n.cyclePower = UPGRADES.barracks.values[n.tiers.barracks];
         n.troopRunning = peaceful;
-        dispatch(g, n);
       }
     }
   }
@@ -2016,55 +2135,12 @@ const NODE_TYPES = {
 
 return {NODE_TYPES};
 },
-"src/core/routing.js":function(require){
-const { neighbors } = require("src/core/selectors.js");
-const { NODE_TYPES } = require("src/content/node-types.js");
-const { RULES } = require("src/content/balance.js");
-const edgeDuration = (g, a, b) => RULES.edgeSeconds / Math.min(NODE_TYPES[g.nodes[a].type].speed, NODE_TYPES[g.nodes[b].type].speed);
-/** Dijkstra: only friendly interior nodes; endpoint may be hostile. */
-function findPath(g, from, to, owner) {
-  if (from === to || g.nodes[from]?.owner !== owner || !g.nodes[to]) return null;
-  const distance = new Map([[from, 0]]), previous = new Map(), open = new Set([from]);
-  while (open.size) {
-    const current = [...open].sort((a, b) => distance.get(a) - distance.get(b))[0]; open.delete(current);
-    if (current === to) { const path = [to]; while (path[0] !== from) path.unshift(previous.get(path[0])); return path; }
-    if (current !== from && g.nodes[current].owner !== owner) continue;
-    for (const next of neighbors(g, current)) {
-      const d = distance.get(current) + edgeDuration(g, current, next);
-      if (d < (distance.get(next) ?? Infinity)) { distance.set(next, d); previous.set(next, current); open.add(next); }
-    }
-  }
-  return null;
-}
-function commitRoutes(g, nodeId, recipients, owner) {
-  const n = g.nodes[nodeId];
-  if (!n || n.owner !== owner) return false;
-  n.routes = [...new Set(recipients)].filter(id => findPath(g, nodeId, id, owner));
-  dispatch(g, n); return true;
-}
-/** Integer shares with rotating remainder; fractional spell power stays at home. */
-function dispatch(g, n) {
-  const paths = n.routes.map(id => findPath(g, n.id, id, n.owner)).filter(Boolean);
-  const power = Math.floor(n.army + 1e-9);
-  if (!paths.length || !power) return;
-  const base = Math.floor(power / paths.length), remainder = power % paths.length;
-  paths.forEach((path, i) => {
-    const extra = (i - n.rotation + paths.length) % paths.length < remainder ? 1 : 0;
-    const amount = base + extra;
-    if (amount) g.waves.push({ id: g.nextWave++, owner: n.owner, power: amount, path, leg: 0, elapsed: 0, duration: edgeDuration(g, path[0], path[1]), created: g.time });
-  });
-  n.rotation = (n.rotation + remainder) % paths.length; n.army -= power;
-}
-
-return {edgeDuration,findPath,commitRoutes,dispatch};
-},
 "src/core/spells.js":function(require){
 const { SPELLS } = require("src/content/spells.js");
 const { BALANCE : B } = require("src/content/balance.js");
 const { owned, atPeace, faction, maxHp } = require("src/core/selectors.js");
 const { upgrade } = require("src/core/economy.js");
 const { damage } = require("src/core/combat.js");
-const { dispatch } = require("src/core/routing.js");
 const { event } = require("src/core/state.js");
 function eligibleLabs(g, p, spell) { return owned(g, p).filter(n => n.tiers.barracks >= spell.tier); }
 function research(g, p, id) {
@@ -2097,7 +2173,7 @@ function validTargets(g, p, id, ids) {
 }
 /** Each effect is isolated. New spells supply a definition and one handler. */
 const EFFECTS = {
-  teleport(g, p, [a, b]) { const amount = Math.floor(a.army / 2); a.army -= amount; b.army += amount; dispatch(g, b); },
+  teleport(g, p, [a, b]) { const amount = Math.floor(a.army / 2); a.army -= amount; b.army += amount; },
   regrowth(g, p, [n]) { n.hp = Math.min(maxHp(n), n.hp + maxHp(n) / 2); },
   leyline(g, p, [a, b]) { if (!g.edges.some(([x, y]) => x === a.id && y === b.id || x === b.id && y === a.id)) g.edges.push([a.id, b.id]); },
   illusion(g, p, ns) { ns.forEach(n => n.effects.hidden = g.time + B.illusionSeconds); },
@@ -2105,7 +2181,7 @@ const EFFECTS = {
   mines(g, p) { g.players[p].gold *= 1 + B.mineBonus; },
   bastion(g, p, [n]) { for (const key of ['hp', 'gold']) if (!upgrade(g, n.id, key, p, true)) n.army += 10; },
   defense(g, p, [n]) { n.effects.shield = g.time + 5; },
-  gear(g, p, ns) { ns.forEach(n => { n.army *= 1 + B.gearBonus; dispatch(g, n); }); },
+  gear(g, p, ns) { ns.forEach(n => { n.army *= 1 + B.gearBonus; }); },
   catapult(g, p, ns) { const source = ns.find(n => n.owner === p), amount = source.army / 4; ns.forEach(n => damage(g, n, amount)); },
   treasures(g, p, [n]) { n.effects.theft = { owner: p, until: g.time + 10 }; },
   heat(g, p, ns) { ns.forEach(n => n.effects.haste = { factor: B.hasteSpeed, until: g.time + B.hasteSeconds }); },
@@ -2154,7 +2230,7 @@ function damage(g, n, amount) {
 function capture(g, n, owner, army) {
   const previous = n.owner;
   n.owner = owner; n.army = army; n.hp = Math.min(maxHp(n), RULES.captureHpPerTier * n.tiers.hp);
-  n.routes = []; n.effects = {}; n.lastDamage = g.time; n.goldElapsed = 0; n.troopElapsed = 0;
+  n.routes = []; n.routeCursor = 0; n.effects = {}; n.lastDamage = g.time; n.goldElapsed = 0; n.troopElapsed = 0;
   n.goldDuration = UPGRADES.gold.values[n.tiers.gold]; n.troopDuration = troopDuration(g, n);
   n.cyclePower = UPGRADES.barracks.values[n.tiers.barracks]; n.troopRunning = false;
   g.captures++; event(g, `${g.players[owner].name} captured ${n.name}.`, 'capture');
@@ -2189,6 +2265,77 @@ function checkVictory(g) {
 }
 
 return {damage,capture,arrive,checkVictory};
+},
+"src/core/routing.js":function(require){
+const { neighbors } = require("src/core/selectors.js");
+const { NODE_TYPES } = require("src/content/node-types.js");
+const { RULES, SEND_PERCENTAGES } = require("src/content/balance.js");
+const edgeDuration = (g, a, b) => RULES.edgeSeconds / Math.min(NODE_TYPES[g.nodes[a].type].speed, NODE_TYPES[g.nodes[b].type].speed);
+/** Dijkstra: only friendly interior nodes; endpoint may be hostile. */
+function findPath(g, from, to, owner) {
+  if (from === to || g.nodes[from]?.owner !== owner || !g.nodes[to]) return null;
+  const distance = new Map([[from, 0]]), previous = new Map(), open = new Set([from]);
+  while (open.size) {
+    const current = [...open].sort((a, b) => distance.get(a) - distance.get(b))[0]; open.delete(current);
+    if (current === to) { const path = [to]; while (path[0] !== from) path.unshift(previous.get(path[0])); return path; }
+    if (current !== from && g.nodes[current].owner !== owner) continue;
+    for (const next of neighbors(g, current)) {
+      const d = distance.get(current) + edgeDuration(g, current, next);
+      if (d < (distance.get(next) ?? Infinity)) { distance.set(next, d); previous.set(next, current); open.add(next); }
+    }
+  }
+  return null;
+}
+function commitRoutes(g, nodeId, recipients, owner) {
+  const n = g.nodes[nodeId];
+  if (!n || n.owner !== owner || owner === null || g.result) return false;
+  const previous = n.routes, cursor = n.routeCursor;
+  const nextInOrder = [...previous.slice(cursor), ...previous.slice(0, cursor)].map(r => r.to);
+  const routes = [];
+  for (const recipient of recipients) {
+    const { to, percent = 100 } = typeof recipient === 'number' ? { to: recipient } : recipient;
+    if (!SEND_PERCENTAGES.includes(percent) || routes.some(r => r.to === to)) continue;
+    const existing = previous.find(r => r.to === to);
+    if (!existing && !findPath(g, nodeId, to, owner)) continue;
+    routes.push({ to, percent, nextSend: existing?.percent === percent ? existing.nextSend : g.time + RULES.orderDelay });
+  }
+  n.routes = routes;
+  const next = nextInOrder.find(to => routes.some(r => r.to === to));
+  n.routeCursor = Math.max(0, routes.findIndex(r => r.to === next));
+  return true;
+}
+function send(g, n, path, percent) {
+  const power = Math.floor(n.army * percent / 100);
+  if (power < 1) return false;
+  g.waves.push({ id: g.nextWave++, owner: n.owner, power, path, leg: 0, elapsed: 0, duration: edgeDuration(g, path[0], path[1]), created: g.time });
+  n.army -= power;
+  return true;
+}
+/** A manual send leaves recurring orders, percentages and clocks untouched. */
+function sendOnce(g, nodeId, to, percent, owner) {
+  const n = g.nodes[nodeId];
+  if (!n || n.owner !== owner || owner === null || g.result || !SEND_PERCENTAGES.includes(percent)) return false;
+  const path = findPath(g, nodeId, to, owner);
+  return path ? send(g, n, path, percent) : false;
+}
+/** Recipients take turns, using the army available at that instant. Zero holds the turn. */
+function ordersStep(g) {
+  for (const n of g.nodes) {
+    if (n.owner === null) continue;
+    for (let checked = 0; checked < n.routes.length; checked++) {
+      const route = n.routes[n.routeCursor];
+      if (g.time + 1e-8 < route.nextSend) { n.routeCursor = (n.routeCursor + 1) % n.routes.length; continue; }
+      const path = findPath(g, n.id, route.to, n.owner);
+      // Temporarily unreachable recipients keep their order, but cannot block reachable ones.
+      if (!path) { n.routeCursor = (n.routeCursor + 1) % n.routes.length; continue; }
+      if (!send(g, n, path, route.percent)) break;
+      route.nextSend = g.time + RULES.sendSeconds;
+      n.routeCursor = (n.routeCursor + 1) % n.routes.length;
+    }
+  }
+}
+
+return {edgeDuration,findPath,commitRoutes,sendOnce,ordersStep};
 },
 "src/core/ai.js":function(require){
 const { owned, neighbors, maxHp } = require("src/core/selectors.js");
@@ -2226,7 +2373,7 @@ function act(g, p, d) {
   if (d.foresight && incoming.length) {
     const target = g.nodes[incoming[0].path.at(-1)];
     const donor = ns.filter(n => n !== target && n.army > 4 && findPath(g, n.id, target.id, p.id)).sort((a, b) => b.army - a.army)[0];
-    if (donor && !donor.routes.includes(target.id)) return commitRoutes(g, donor.id, [target.id], p.id);
+    if (donor && !donor.routes.some(r => r.to === target.id)) return commitRoutes(g, donor.id, [target.id], p.id);
   }
   const frontier = g.nodes.filter(n => n.owner !== p.id && neighbors(g, n.id).some(i => g.nodes[i].owner === p.id));
   const force = ns.reduce((a, n) => a + n.army, 0);
@@ -2235,7 +2382,7 @@ function act(g, p, d) {
   })).sort((a, b) => a.score - b.score);
   const target = targets.find(t => force > t.cost * d.caution + 2);
   if (target) {
-    const donor = [...ns].sort((a, b) => b.army - a.army).find(n => n.army >= 2 && !n.routes.includes(target.n.id) && findPath(g, n.id, target.n.id, p.id));
+    const donor = [...ns].sort((a, b) => b.army - a.army).find(n => n.army >= 2 && !n.routes.some(r => r.to === target.n.id) && findPath(g, n.id, target.n.id, p.id));
     if (donor) return commitRoutes(g, donor.id, [target.n.id], p.id);
   }
   // Faction biases are explicit and editable, not hidden resource bonuses.
@@ -2295,7 +2442,6 @@ return {escape,icon,fmt,money,button,clock};
 const BUTTONS = {
   start: { text: 'Raise your banner', icon: 'banner', className: 'primary', ref: 'setup.start' },
   pause: { text: 'Pause', icon: 'pause', ref: 'hud.pause' },
-  routes: { text: 'Commit orders', icon: 'arrow', className: 'primary', ref: 'orders.commit' },
   clear: { text: 'Clear routes', ref: 'orders.clear' },
   research: { text: 'Research', ref: 'magic.research' },
   cast: { text: 'Cast spell', className: 'primary', ref: 'magic.cast' },
@@ -2396,13 +2542,13 @@ function terrain(g) {
   return `<g class="landscape" aria-hidden="true"><path class="contour" d="M0 80Q${g.width/3} -70 ${g.width/2} 80T${g.width} 60M0 ${g.height-30}Q${g.width/2} ${g.height-130} ${g.width} ${g.height-10}"/><g class="trees">${trees}</g><text class="region-label" x="${g.width*.52}" y="30" text-anchor="middle">THE BORDERLANDS</text><text class="region-label" x="${g.width*.52}" y="${g.height-10}" text-anchor="middle">THE OLD KINGDOM</text><g class="compass" transform="translate(${g.width-40} ${g.height-55})"><path d="M0-24L5 0 0 24-5 0zM-20 0L0-4 20 0 0 4z"/><text y="-30" text-anchor="middle">N</text></g></g>`;
 }
 function battlefieldView(g, ui) {
-  const selected = [...ui.selected], common = selected.length ? (ui.drafts[selected[0]] || []).filter(id => selected.every(s => (ui.drafts[s] || []).includes(id))) : [];
+  const selected = [...ui.selected], common = selected.length ? g.nodes[selected[0]].routes.filter(r => selected.every(s => g.nodes[s].routes.some(other => other.to === r.to))).map(r => r.to) : [];
   return `<g id="land">${ui.terrain}</g><g class="roads">${g.edges.map(([a,b])=>`<line x1="${g.nodes[a].x}" y1="${g.nodes[a].y}" x2="${g.nodes[b].x}" y2="${g.nodes[b].y}"/>`).join('')}</g>
-  <g class="order-lines">${selected.flatMap(id => (ui.drafts[id] || []).map(to=>`<path d="M${g.nodes[id].x} ${g.nodes[id].y}L${g.nodes[to].x} ${g.nodes[to].y}"/>`)).join('')}</g>
+  <g class="order-lines">${selected.flatMap(id => g.nodes[id].routes.map(r=>`<path d="M${g.nodes[id].x} ${g.nodes[id].y}L${g.nodes[r.to].x} ${g.nodes[r.to].y}"/>`)).join('')}</g>
   <g>${g.nodes.map(n => {
     const color = n.owner === null ? '#92917a' : g.players[n.owner].color, picked = ui.selected.has(n.id), target = ui.targets.includes(n.id), hidden = n.owner !== 0 && n.effects.hidden > g.time;
-    return `<g class="map-node ${picked ? 'selected' : ''} ${common.includes(n.id) ? 'recipient' : ''} ${target ? 'spell-target' : ''}" transform="translate(${n.x} ${n.y})" data-node="${n.id}" data-ui="map.node.${n.label}" tabindex="0" role="button" aria-label="${escape(n.name)}, ${n.owner === null ? 'vacant' : g.players[n.owner].name}, ${hidden ? 'hidden' : fmt(n.army)} army, ${fmt(n.hp)} health" style="--owner:${color}">
-    <title>${n.label} · ${n.name} · ${NODE_TYPES[n.type].name}\nArmy ${hidden ? '?' : fmt(n.army)} · HP ${fmt(n.hp)} / ${fmt(maxHp(n))}\n${n.owner === 0 ? 'Left: select. Right: upgrade or route.' : 'Right-click to set recipient.'}</title>
+    return `<g class="map-node ${picked ? 'selected' : ''} ${common.includes(n.id) ? 'recipient' : ''} ${target ? 'spell-target' : ''} ${ui.dragOrder?.to===n.id ? 'drop-target' : ''}" transform="translate(${n.x} ${n.y})" data-node="${n.id}" data-ui="map.node.${n.label}" tabindex="0" role="button" aria-label="${escape(n.name)}, ${n.owner === null ? 'vacant' : g.players[n.owner].name}, ${hidden ? 'hidden' : fmt(n.army)} army, ${fmt(n.hp)} health" style="--owner:${color}">
+    <title>${n.label} · ${n.name} · ${NODE_TYPES[n.type].name}\nArmy ${hidden ? '?' : fmt(n.army)} · HP ${fmt(n.hp)} / ${fmt(maxHp(n))}\n${n.owner === 0 ? 'Left: select and upgrade. Drag: send once. Right: toggle recipient.' : 'Drop troops here, or right-click to toggle recipient.'}</title>
     <circle class="node-shadow" r="32" cy="3"/><circle class="king-ring" r="37" ${n.king === null ? 'visibility="hidden"' : ''}/><circle class="selection-ring" r="41"/><circle class="target-ring" r="44"/><circle class="node-disc" r="29"/>
     ${img(n.king !== null ? 'crown' : NODE_TYPES[n.type].icon, -20,-24,40)}
     <rect class="army-badge" x="-23" y="14" width="46" height="24" rx="9"/><text class="army-number" text-anchor="middle" y="31" data-ui="map.node.${n.label}.army">${hidden ? '?' : fmt(n.army)}</text>
@@ -2414,7 +2560,7 @@ function battlefieldView(g, ui) {
   }).join('')}</g><g class="armies" aria-hidden="true">${g.waves.map(w=>{
     const a=g.nodes[w.path[w.leg]],b=g.nodes[w.path[w.leg+1]],t=Math.min(1,w.elapsed/w.duration),x=a.x+(b.x-a.x)*t,y=a.y+(b.y-a.y)*t;
     return `<g transform="translate(${x} ${y})"><circle r="13" fill="${g.players[w.owner].color}" stroke="#f0e6ca" stroke-width="2"/>${img('troop',-9,-13,18)}<text y="23" text-anchor="middle">${fmt(w.power)}</text></g>`;
-  }).join('')}</g>`;
+  }).join('')}</g><g class="drag-order" aria-hidden="true">${ui.dragOrder?`<path d="M${g.nodes[ui.dragOrder.from].x} ${g.nodes[ui.dragOrder.from].y}L${ui.dragOrder.x} ${ui.dragOrder.y}"/><text x="${ui.dragOrder.x+15}" y="${ui.dragOrder.y-15}">${ui.percent}%</text>`:''}</g>`;
 }
 
 return {terrain,battlefieldView};
@@ -2426,15 +2572,19 @@ const { UPGRADES } = require("src/content/upgrades.js");
 const { SPELLS } = require("src/content/spells.js");
 const { NODE_TYPES } = require("src/content/node-types.js");
 const { STATS } = require("src/content/stats.js");
+const { SEND_PERCENTAGES } = require("src/content/balance.js");
 const { totals, maxHp, upgradeCost, atPeace } = require("src/core/selectors.js");
 const { eligibleLabs } = require("src/core/spells.js");
 const { icon, button, fmt, money, escape, clock } = require("src/ui/components.js");
 function shell(g) {
   return `<header class="hud"><div class="wordmark">${icon('crown')}<div>NODE BASED<span>WARFARE</span></div></div><div id="hud-stats" class="hud-stats"></div><div class="hud-controls"><span id="game-clock" class="stat-time">00:00</span>${button('pause')}${button('new')}</div></header>
   <main class="game-layout"><aside class="sidebar"><div class="side-header"><span class="eyebrow">YOUR KINGDOM</span><strong>${FACTIONS[g.players[0].faction].title}</strong></div><section id="node-panel"></section><section id="rivals" class="rivals"></section><section id="dispatches" class="dispatches"></section><nav class="tools">${button('help')}${button('art')}${button('inspect')}</nav></aside>
-  <section class="war-table"><div class="map-heading"><div><span class="eyebrow">THE FRONTIER</span><h2>${MODES[g.config.mode].name}</h2></div><p>${MODES[g.config.mode].goal}</p><div class="zoom"><button data-action="zoom-out" data-ui="map.zoom.out" aria-label="Zoom out">−</button><button data-action="zoom-reset" data-ui="map.zoom.reset">Fit</button><button data-action="zoom-in" data-ui="map.zoom.in" aria-label="Zoom in">+</button></div></div>
-  <div id="map-wrap" class="map-wrap"><svg id="battlefield" xmlns="http://www.w3.org/2000/svg" aria-label="Battlefield" viewBox="0 0 ${g.width} ${g.height}"></svg><div id="context-menu" class="context-menu" hidden></div><div id="pause-banner" hidden>THE BATTLE IS PAUSED</div></div>
+  <section class="war-table"><div class="map-heading"><div><span class="eyebrow">THE FRONTIER</span><h2>${MODES[g.config.mode].name}</h2></div><p>${MODES[g.config.mode].goal}</p><div id="send-meter" class="send-meter" data-ui="orders.percentage"></div><div class="zoom"><button data-action="zoom-out" data-ui="map.zoom.out" aria-label="Zoom out">−</button><button data-action="zoom-reset" data-ui="map.zoom.reset">Fit</button><button data-action="zoom-in" data-ui="map.zoom.in" aria-label="Zoom in">+</button></div></div>
+  <div id="map-wrap" class="map-wrap"><svg id="battlefield" xmlns="http://www.w3.org/2000/svg" aria-label="Battlefield" viewBox="0 0 ${g.width} ${g.height}"></svg><section id="upgrade-menu" class="upgrade-menu" aria-label="Selected node upgrades" data-ui="node.upgrades" hidden></section><div id="pause-banner" hidden>THE BATTLE IS PAUSED</div></div>
   <div class="map-instructions" id="map-instructions"></div><section class="spell-dock"><div class="deck-heading"><span>${icon('book')} THE SPELLBOOK</span><small>Research. Prepare. Turn the tide.</small></div><div id="spell-cards" class="spell-cards"></div></section></section></main>`;
+}
+function sendMeter(percent) {
+  return `<span class="meter-label">ARMY TO SEND</span><div class="meter-notches" role="group" aria-label="Percentage of army to send">${SEND_PERCENTAGES.map(p=>`<button data-action="send-percent:${p}" data-ui="orders.percentage.${p}" aria-pressed="${p===percent}" title="Send ${p}% · Mouse wheel or ↑ / ↓">${p}%</button>`).join('')}</div>`;
 }
 function hud(g) {
   const t = totals(g,0);
@@ -2450,7 +2600,7 @@ function nodePanel(g, ui) {
   const n = g.nodes[ui.focus];
   if (!n) return `<div class="empty-panel">${icon('banner')}<h2>Your next move</h2><p>Select a stronghold to inspect its army, strengthen its walls, or send troops to the frontier.</p></div>`;
   return `<div class="node-summary"><span class="eyebrow">${n.label} · ${n.king!==null?'KING NODE':NODE_TYPES[n.type].name.toUpperCase()}</span><h2>${escape(n.name)}</h2><p>${n.owner === null?'Unclaimed territory':g.players[n.owner].name+' · '+FACTIONS[g.players[n.owner].faction].name}</p><div class="node-stats"><div data-ui="node.stat.army">${icon(STATS.army.icon)}<strong class="${STATS.army.className}">${n.owner!==0&&n.effects.hidden>g.time?'?':fmt(n.army)}</strong><small>ARMY POWER</small></div><div data-ui="node.stat.hp">${icon(STATS.hp.icon)}<strong class="${STATS.hp.className}">${fmt(n.hp)}<i> / ${fmt(maxHp(n))}</i></strong><small>BASE HEALTH</small></div></div><div class="production-line"><span class="stat-gold">${icon('gold')} 1 / ${UPGRADES.gold.values[n.tiers.gold]}s</span><span class="stat-rate">${icon('sword')} ${UPGRADES.barracks.values[n.tiers.barracks]} / ${fmt(n.troopDuration)}s</span></div><small class="terrain-note">${NODE_TYPES[n.type].description}${!atPeace(g,n)?' · Under siege':''}</small></div>
-  ${n.owner===0?`<div class="upgrades"><div class="section-label">DEVELOP STRONGHOLD ${n.king!==null?'<em>50% KING DISCOUNT</em>':''}</div>${upgrades(g,n)}</div><div class="orders"><div class="section-label">MARCHING ORDERS <span>${ui.selected.size} selected</span></div><p>${(ui.drafts[n.id] || n.routes).length ? (ui.drafts[n.id] || n.routes).map(id=>g.nodes[id].label).join(' · ') : 'No routes. Your army holds here.'}</p>${button('routes',{disabled:!ui.selected.size})}${button('clear',{disabled:!ui.selected.size})}<small>Right-click destinations. Deselect to send.</small><button data-action="route-mode" data-ui="orders.touch">${ui.routeMode?'Exit':'Enable'} tap-to-route mode</button></div>`:'<div class="orders"><p>Select your stronghold, then right-click this node to order an advance.</p></div>'}`;
+  ${n.owner===0?`<div class="orders"><div class="section-label">MARCHING ORDERS <span>${ui.selected.size} selected</span></div>${n.routes.length?`<ol class="recipient-list">${n.routes.map(r=>`<li><span>${g.nodes[r.to].label}</span><strong>${r.percent}%</strong></li>`).join('')}</ol>`:'<p>No recipients. Your army holds here.</p>'}${button('clear',{disabled:!ui.selected.size})}<small>Drag to send once. Right-click to toggle a recipient at the current %. Orders continue when deselected.</small><button data-action="route-mode" data-ui="orders.touch" aria-pressed="${ui.routeMode}">${ui.routeMode?'Exit':'Enable'} tap-to-route mode</button></div>`:'<div class="orders"><p>Drag from your stronghold to send once, or select it and right-click this node to add a recurring recipient.</p></div>'}`;
 }
 function rivals(g) {
   return `<div class="section-label">THE RIVAL BANNERS</div>${g.players.slice(1).map(p=>`<div class="rival-row"><span class="rival-dot" style="--rival:${p.color}"></span><div><strong>${FACTIONS[p.faction].name}</strong><small>${p.alive ? p.difficulty : 'Defeated'}</small></div><b>${totals(g,p.id).nodes}<small> NODES</small></b></div>`).join('')}`;
@@ -2465,7 +2615,7 @@ function spellCards(g) {
 }
 function dispatches(g) { return `<div class="section-label">FIELD DISPATCHES</div>${g.log.slice(0,3).map(e=>`<p><time>${clock(e.time)}</time> ${escape(e.text)}</p>`).join('')||'<p>The realm holds its breath.</p>'}`; }
 
-return {shell,hud,upgrades,nodePanel,rivals,spellCards,dispatches};
+return {shell,sendMeter,hud,upgrades,nodePanel,rivals,spellCards,dispatches};
 },
 "src/content/stats.js":function(require){
 /** Stable stat IDs also name the font tokens in styles/tokens.css. */

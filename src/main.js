@@ -1,10 +1,10 @@
 import { createGame } from './core/state.js';
 import { step } from './core/engine.js';
-import { commitRoutes, findPath } from './core/routing.js';
+import { commitRoutes, findPath, sendOnce } from './core/routing.js';
 import { upgrade } from './core/economy.js';
 import { research, cast, validTargets } from './core/spells.js';
 import { totals } from './core/selectors.js';
-import { RULES } from './content/balance.js';
+import { RULES, SEND_PERCENTAGES } from './content/balance.js';
 import { FACTIONS } from './content/factions.js';
 import { SPELLS } from './content/spells.js';
 import { ASSETS, asset, saveAsset } from './ui/assets.js';
@@ -13,17 +13,17 @@ import { renderInto } from './ui/dom.js';
 import { dissolveCard } from './ui/feedback.js';
 import { setupView, botOptions } from './ui/setup.js';
 import { battlefieldView, terrain } from './ui/battlefield.js';
-import { shell, hud, nodePanel, rivals, spellCards, dispatches, upgrades } from './ui/panels.js';
+import { shell, hud, nodePanel, rivals, spellCards, dispatches, upgrades, sendMeter } from './ui/panels.js';
 
 let config = { mode: 'conquest', faction: 'elves', bots: [{ faction: 'dwarves', difficulty: 'normal' }], nodesPerPlayer: 12, seed: 'Alderwatch' };
 let g, paused = true, started = false, resultShown = false, toastTimer;
-const ui = { selected: new Set(), drafts: {}, focus: null, spell: null, targets: [], preview: null, inspecting: false, routeMode: false, zoom: 1, cx: 0, cy: 0, context: null, terrain: '' };
+const ui = { selected: new Set(), focus: null, percent: 100, dragOrder: null, spell: null, targets: [], preview: null, inspecting: false, routeMode: false, zoom: 1, cx: 0, cy: 0, terrain: '' };
 const $ = selector => document.querySelector(selector);
 const modal = $('#modal');
 function toast(text) { $('#toast').textContent = text; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 3000); }
 function initialize() {
   g = createGame(config); paused = true; resultShown = false;
-  Object.assign(ui, { selected: new Set(), drafts: {}, focus: g.nodes.find(n => n.owner === 0).id, spell: null, targets: [], zoom: 1, cx: g.width / 2, cy: g.height / 2, context: null, terrain: terrain(g) });
+  Object.assign(ui, { selected: new Set(), focus: g.nodes.find(n => n.owner === 0).id, percent: 100, dragOrder: null, spell: null, targets: [], routeMode: false, zoom: 1, cx: g.width / 2, cy: g.height / 2, terrain: terrain(g) });
   $('#app').innerHTML = shell(g);
   // On a narrow viewport, start near the player's keep at a readable scale.
   const mapWidth = $('#map-wrap').getBoundingClientRect().width;
@@ -41,25 +41,28 @@ function readSetup() {
 }
 function closeModal() { $('#app').inert = false; modal.hidden = true; modal.innerHTML = ''; ui.preview = null; }
 function dialog(title, body, cls = '') { paused = true; modal.hidden = false; $('#app').inert = true; modal.innerHTML = `<section class="dialog ${cls}" role="dialog" aria-modal="true" aria-label="${escape(title)}"><header><h2>${title}</h2><button data-action="close-modal" aria-label="Close dialog" data-ui="dialog.close">×</button></header>${body}</section>`; modal.querySelector('button')?.focus(); }
-function deselect(id) {
-  if (!ui.selected.has(id)) return;
-  commitRoutes(g, id, ui.drafts[id] || [], 0); ui.selected.delete(id); delete ui.drafts[id];
-}
-function commitAll() { [...ui.selected].forEach(deselect); ui.context = null; }
+function clearSelection() { ui.selected.clear(); }
 function selectNode(id, shift) {
-  if (ui.selected.has(id)) { deselect(id); return; }
-  if (!shift) commitAll();
-  ui.selected.add(id); ui.drafts[id] = [...g.nodes[id].routes];
+  if (ui.selected.has(id)) { ui.selected.delete(id); ui.focus = [...ui.selected].at(-1) ?? id; return; }
+  if (!shift) clearSelection();
+  ui.selected.add(id); ui.focus = id;
 }
 function toggleRecipient(id, clear) {
   if (!ui.selected.size) return;
   let valid = false;
   for (const from of ui.selected) {
-    if (clear) { ui.drafts[from] = []; valid = true; continue; }
-    if (!findPath(g, from, id, 0)) continue;
-    const routes = ui.drafts[from]; ui.drafts[from] = routes.includes(id) ? routes.filter(n=>n!==id) : [...routes,id]; valid=true;
+    const routes = g.nodes[from].routes, existing = routes.some(r => r.to === id);
+    if (clear) { if (existing) { commitRoutes(g, from, [], 0); valid = true; } continue; }
+    if (!existing && !findPath(g, from, id, 0)) continue;
+    commitRoutes(g, from, existing ? routes.filter(r => r.to !== id) : [...routes, { to: id, percent: ui.percent }], 0);
+    valid = true;
   }
   if (!valid) toast('Reach this node through your own territory first.');
+}
+function adjustPercent(direction) {
+  const index = SEND_PERCENTAGES.indexOf(ui.percent);
+  ui.percent = SEND_PERCENTAGES[Math.max(0, Math.min(SEND_PERCENTAGES.length - 1, index + direction))];
+  refresh();
 }
 function targetNode(id, right, shift) {
   const n=g.nodes[id], s=SPELLS[ui.spell];
@@ -74,18 +77,17 @@ function targetNode(id, right, shift) {
 function nodeClick(e, id, right=false) {
   if (ui.spell) { targetNode(id,right,e.shiftKey);refresh();return; }
   const n=g.nodes[id];
-  if (right && ui.selected.size && !ui.selected.has(id) || !right && ui.routeMode && ui.selected.size && !ui.selected.has(id)) toggleRecipient(id,e.shiftKey);
-  else if (right && n.owner===0) {
-    ui.focus=id; const rect=$('#map-wrap').getBoundingClientRect();
-    ui.context={id,x:Math.max(0,Math.min(e.clientX-rect.left+10,rect.width-260)),y:Math.max(0,Math.min(e.clientY-rect.top,rect.height-230))};
-  } else if (!right) { ui.focus=id;ui.context=null;if(n.owner===0)selectNode(id,e.shiftKey); }
+  if (right && ui.selected.size || !right && ui.routeMode && ui.selected.size && !ui.selected.has(id)) toggleRecipient(id,e.shiftKey);
+  else if (!right) { ui.focus=id;if(n.owner===0)selectNode(id,e.shiftKey);else clearSelection(); }
   refresh();
 }
 function refresh() {
-  for (const id of [...ui.selected]) if(g.nodes[id].owner!==0){ui.selected.delete(id);delete ui.drafts[id];}
+  for (const id of [...ui.selected]) if(g.nodes[id].owner!==0)ui.selected.delete(id);
+  if (ui.selected.size && !ui.selected.has(ui.focus)) ui.focus = [...ui.selected].at(-1);
   renderInto($('#hud-stats'),hud(g)); $('#game-clock').textContent=clock(g.time);
   const pause=$('[data-action="pause"]'); if(pause)pause.innerHTML=icon('pause')+(paused?'Resume':'Pause');
   renderInto($('#node-panel'),nodePanel(g,ui)); renderInto($('#rivals'),rivals(g)); renderInto($('#spell-cards'),spellCards(g)); renderInto($('#dispatches'),dispatches(g));
+  renderInto($('#send-meter'),sendMeter(ui.percent));
   const svg=$('#battlefield'); svg.setAttribute('viewBox',`${ui.cx-g.width/ui.zoom/2} ${ui.cy-g.height/ui.zoom/2} ${g.width/ui.zoom} ${g.height/ui.zoom}`);
   // Parse SVG through an SVG wrapper to retain the correct namespace.
   const wrapper=document.createElement('div');renderInto(wrapper,`<svg xmlns="http://www.w3.org/2000/svg">${battlefieldView(g,ui)}</svg>`);
@@ -94,16 +96,17 @@ function refresh() {
   if(ui.spell) {
     const s=SPELLS[ui.spell];
     renderInto($('#map-instructions'),`<strong>${s.name}</strong><span>${targetInstruction(s.target)}</span>${button('cast',{disabled:!validTargets(g,0,s.id,ui.targets)})}<button data-action="cancel-spell" data-ui="magic.cancel">Cancel</button>`);
-  } else renderInto($('#map-instructions'),`<span><strong>Left click</strong> select</span><span>·</span><span><strong>Shift + click</strong> multi-select</span><span>·</span><span><strong>Right click</strong> route / upgrade</span><span>·</span><span><strong>Enter</strong> commit</span>`);
-  const menu=$('#context-menu');menu.hidden=!ui.context;
-  if(ui.context){const n=g.nodes[ui.context.id];if(n.owner!==0){ui.context=null;menu.hidden=true;}else{menu.style.left=ui.context.x+'px';menu.style.top=ui.context.y+'px';renderInto(menu,`<div class="section-label">${escape(n.name)}</div>${upgrades(g,n)}`);}}
+  } else renderInto($('#map-instructions'),`<span><strong>Drag</strong> send once</span><span>·</span><span><strong>Right click</strong> toggle recipient</span><span>·</span><span><strong>Wheel / ↑ ↓</strong> army %</span><span>·</span><span><strong>Shift + click</strong> multi-select</span>`);
+  const menu=$('#upgrade-menu'), n=g.nodes[ui.focus];
+  menu.hidden=!ui.selected.size || n?.owner!==0 || Boolean(ui.spell || ui.dragOrder);
+  if(!menu.hidden)renderInto(menu,`<div class="section-label">${n.label} · ${escape(n.name)}</div><small>${n.king!==null?'50% king discount':'DEVELOP STRONGHOLD'}</small>${upgrades(g,n)}`);
 }
 // SVG updates preserve focus and pointer targets just like the HTML reconciler.
 function renderSvg(old,fresh){
   for(let i=0;i<fresh.childNodes.length;i++){const n=fresh.childNodes[i],o=old.childNodes[i];if(!o){old.append(n.cloneNode(true));continue;}if(n.nodeName!==o.nodeName){o.replaceWith(n.cloneNode(true));continue;}if(n.nodeType===3){if(o.textContent!==n.textContent)o.textContent=n.textContent;continue;}if(n.nodeType!==1)continue;for(const a of [...o.attributes])if(!n.hasAttribute(a.name))o.removeAttribute(a.name);for(const a of n.attributes)if(o.getAttribute(a.name)!==a.value)o.setAttribute(a.name,a.value);renderSvg(o,n);}while(old.childNodes.length>fresh.childNodes.length)old.lastChild.remove();
 }
 function targetInstruction(type){return {own:'Left-click a friendly node.',enemy:'Right-click an enemy node.',twoOwn:'Left-click source, then destination.',twoAny:'Choose two occupied nodes: left for yours, right for enemies.',mixed:'Left-click your source; right-click an enemy.',allOwn:'All your nodes selected; left-click to exclude.',none:'Confirm to cast.'}[type];}
-function help(){dialog('The field guide',`<p>Grow your economy, raise an army, and send it across the frontier. Your rivals have the same resources and rules.</p><h3>Orders without the clutter</h3><ul><li>Left-click your node to select it. Hold Shift to select more.</li><li>Right-click destinations to toggle routes. Red rings show recipients shared by all selected sources.</li><li>Click empty land, deselect the source, or press Enter to commit. All stationed troops leave immediately; future production follows.</li><li>While editing orders, existing routes keep running. Shift-right-click a recipient clears the drafts.</li><li>Right-click a selected friendly node to open upgrades, or use the permanent command panel.</li><li>On touch devices, select a source, enable tap-to-route, tap destinations, then Commit orders.</li></ul><h3>Gold, steel & spellcraft</h3><p>Gold is earned in independent node cycles. Army power absorbs attacks before walls. Surplus attackers capture a node and inherit its upgrades. Damage stops regeneration and pauses research for five seconds; a troop already being trained still finishes.</p><p>Upgrade barracks to research your faction’s spells. Click a ready card, review it, choose targets, then confirm the cast. Vacant nodes are never spell targets. A barracks can handle one research job at a time.</p><h3>Field controls</h3><p>Space: pause/resume · Enter: commit routes · Escape: cancel spell or commit/deselect · F2: element references. Zoom with +/−/Fit; drag empty land to pan when zoomed.</p><p>Dialogs pause battle. Use Resume when you are ready. WIP balance values are provisional. Refer to <a href="./docs/IMPLEMENTATION_PLAN.md" target="_blank">the implementation plan</a> for decisions.</p>`);}
+function help(){dialog('The field guide',`<p>Grow your economy, raise an army, and send it across the frontier. Your rivals have the same resources and rules.</p><h3>Marching orders</h3><ul><li>Set the army meter to 25%, 50%, 75% or 100%. Use the mouse wheel over the map, ↑ / ↓, or click a notch.</li><li>Hold and drag from your node to a reachable node to send that percentage once, rounded down. A drop that cannot send a whole point leaves your army in place.</li><li>Left-click your node to select it and open upgrades on the right. Hold Shift to select more sources.</li><li>Right-click a destination to add a recurring recipient using the meter percentage at that moment. Right-click it again to remove it; Shift-right-click a recipient clears that source’s orders.</li><li>The first request is ready after one second. Each recipient waits three seconds after its successful send before requesting again. Due recipients take turns in selection order, using the army available at their turn; a request that rounds to zero waits until it can send a whole point.</li><li>Changing the meter affects new orders. To change an existing recipient’s percentage, remove it and add it again. Orders keep running when you deselect the source.</li><li>Red rings show recipients shared by selected sources. The marching orders list shows their order and saved percentages.</li><li>On touch devices, drag to send once, or enable tap-to-route and tap destinations for recurring orders.</li></ul><h3>Gold, steel & spellcraft</h3><p>Gold is earned in independent node cycles. Army power absorbs attacks before walls. Surplus attackers capture a node and inherit its upgrades. Damage stops regeneration and pauses research for five seconds; a troop already being trained still finishes.</p><p>Upgrade barracks to research your faction’s spells. Click a ready card, review it, choose targets, then confirm the cast. Vacant nodes are never spell targets. A barracks can handle one research job at a time.</p><h3>Field controls</h3><p>Space: pause/resume · ↑ / ↓: army percentage · Enter on a focused node: select · Escape: cancel drag/spell or deselect · F2: element references. Zoom with +/−/Fit; drag empty land to pan when zoomed.</p><p>Dialogs pause battle. Use Resume when you are ready. WIP balance values are provisional. Refer to <a href="./docs/IMPLEMENTATION_PLAN.md" target="_blank">the implementation plan</a> for decisions.</p>`);}
 function artWorkshop(){dialog('Art workshop',`<p>Upload PNG, WebP, JPEG or SVG artwork to replace any sprite. Changes are stored in this browser. For permanent project artwork, replace the matching file in <code>assets/</code> or edit <code>src/ui/assets.js</code>.</p><div class="asset-grid">${Object.keys(ASSETS).map(id=>`<div class="asset-slot">${icon(id)}<strong>${id}</strong><label>Upload image<input type="file" accept="image/png,image/webp,image/jpeg,image/svg+xml" data-asset="${id}" data-ui="art.upload.${id}"></label><button data-action="reset-art:${id}" data-ui="art.reset.${id}">Reset</button></div>`).join('')}</div>`);}
 function toggleInspect(){ui.inspecting=!ui.inspecting;document.body.classList.toggle('inspecting',ui.inspecting);$('#reference').hidden=!ui.inspecting;$('#reference').textContent='F2 references · Hover an element, then click to copy its ID.';toast(ui.inspecting?'Reference mode on. Click an element to copy its ID.':'Reference mode off.');}
 function action(value){
@@ -113,13 +116,13 @@ function action(value){
     case 'pause':paused=!paused;break;
     case 'new':showSetup();break;
     case 'close-modal':closeModal();break;
-    case 'routes':commitAll();toast('Orders committed.');break;
-    case 'clear':for(const n of ui.selected)ui.drafts[n]=[];break;
+    case 'clear':for(const n of ui.selected)commitRoutes(g,n,[],0);break;
+    case 'send-percent':if(SEND_PERCENTAGES.includes(Number(id)))ui.percent=Number(id);break;
     case 'route-mode':ui.routeMode=!ui.routeMode;break;
     case 'upgrade':if(!upgrade(g,Number(id),key,0))toast('This upgrade is unavailable.');break;
     case 'research':if(research(g,0,id))toast(`${SPELLS[id].name} research started.`);else toast('An eligible free barracks and enough gold are required.');break;
     case 'preview':ui.preview=id;{const s=SPELLS[id];modal.hidden=false;$('#app').inert=true;modal.innerHTML=`<section class="dialog spell-preview" role="dialog" aria-modal="true" aria-label="${s.name}"><header><span class="eyebrow">TIER ${s.tier} · ${FACTIONS[s.faction].name.toUpperCase()}</span><button data-action="close-modal" aria-label="Close spell">×</button></header>${icon(s.icon)}<h2>${s.name}</h2><p>${s.description}</p><small>The battle continues while you prepare your spell.</small><button class="primary" data-action="arm:${id}" data-ui="magic.choose-targets">${s.target==='none'?'Cast spell':'Choose targets'}</button></section>`;}break;
-    case 'arm':closeModal();commitAll();ui.spell=id;ui.targets=SPELLS[id].target==='allOwn'?g.nodes.filter(n=>n.owner===0).map(n=>n.id):[];if(SPELLS[id].target==='none')action('cast');break;
+    case 'arm':closeModal();clearSelection();ui.spell=id;ui.targets=SPELLS[id].target==='allOwn'?g.nodes.filter(n=>n.owner===0).map(n=>n.id):[];if(SPELLS[id].target==='none')action('cast');break;
     case 'cast':if(cast(g,0,ui.spell,ui.targets)){dissolveCard(ui.spell);toast(`${SPELLS[ui.spell].name} cast.`);ui.spell=null;ui.targets=[];}else toast('Choose valid targets first.');break;
     case 'cancel-spell':ui.spell=null;ui.targets=[];break;
     case 'help':help();break;
@@ -134,13 +137,14 @@ function action(value){
   refresh();
 }
 document.addEventListener('click',e=>{
+  if(dragMoved && e.detail>0){e.preventDefault();return;}
   if(ui.inspecting && e.target.closest('[data-action]')?.dataset.action !== 'inspect'){const target=e.target.closest('[data-ui]');if(target){e.preventDefault();e.stopPropagation();const ref=target.dataset.ui;navigator.clipboard?.writeText(ref).then(()=>toast(`Copied ${ref}`)).catch(()=>toast(ref));$('#reference').textContent=ref;}return;}
   const control=e.target.closest('[data-action]');if(control){action(control.dataset.action);return;}
   const node=e.target.closest('[data-node]');if(node){nodeClick(e,Number(node.dataset.node));return;}
-  if(e.target.closest('#battlefield')&&!dragMoved){if(ui.spell)action('cancel-spell');else commitAll();ui.context=null;refresh();}
+  if(e.target.closest('#battlefield')){if(ui.spell)action('cancel-spell');else clearSelection();refresh();}
 });
 document.addEventListener('contextmenu',e=>{
-  if(!e.target.closest('#map-wrap'))return;e.preventDefault();const node=e.target.closest('[data-node]');if(node)nodeClick(e,Number(node.dataset.node),true);else{commitAll();ui.context=null;if(ui.spell)action('cancel-spell');refresh();}
+  if(!e.target.closest('#battlefield'))return;e.preventDefault();const node=e.target.closest('[data-node]');if(node)nodeClick(e,Number(node.dataset.node),true);else{clearSelection();if(ui.spell)action('cancel-spell');refresh();}
 });
 document.addEventListener('change',e=>{
   if(e.target.name==='botCount'){config=readSetup();renderInto($('#bot-options'),botOptions(config.bots));}
@@ -149,18 +153,66 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='F2'){e.preventDefault();toggleInspect();return;}
-  if(e.target.matches('input,select,textarea'))return;
-  if(e.key==='Escape'){if(!modal.hidden){if(!$('#setup-form'))closeModal();}else if(ui.spell)action('cancel-spell');else{commitAll();ui.context=null;}refresh();}
+  if(e.target.matches('input,select,textarea') || e.target.isContentEditable)return;
+  if(e.key==='Escape'){cancelDrag();if(!modal.hidden){if(!$('#setup-form'))closeModal();}else if(ui.spell)action('cancel-spell');else clearSelection();refresh();}
   if(!modal.hidden)return;
-  if(e.code==='Space'){e.preventDefault();action('pause');}
-  if(e.key==='Enter'){e.preventDefault();const n=e.target.closest('[data-node]');if(n)nodeClick(e,Number(n.dataset.node));else action('routes');}
+  if(e.key==='ArrowUp' || e.key==='ArrowDown'){e.preventDefault();adjustPercent(e.key==='ArrowUp'?1:-1);return;}
+  if(e.code==='Space' && !e.target.closest('button')){e.preventDefault();action('pause');}
+  if(e.key==='Enter'){const n=e.target.closest('[data-node]');if(n){e.preventDefault();nodeClick(e,Number(n.dataset.node));}}
 });
+document.addEventListener('wheel',e=>{
+  if(!modal.hidden || ui.inspecting || e.ctrlKey || !e.deltaY || !e.target.closest('.map-heading, #map-wrap') || e.target.closest('#upgrade-menu'))return;
+  e.preventDefault();adjustPercent(e.deltaY<0?1:-1);
+},{passive:false});
 document.addEventListener('pointermove',e=>{if(ui.inspecting){const t=e.target.closest('[data-ui]');if(t)$('#reference').textContent=`${t.dataset.ui} · click to copy`;}});
 let drag=null,dragMoved=false;
-document.addEventListener('pointerdown',e=>{dragMoved=false;if(ui.zoom>1&&e.button===0&&e.target.closest('#battlefield')&&!e.target.closest('[data-node]'))drag={x:e.clientX,y:e.clientY,cx:ui.cx,cy:ui.cy};});
-document.addEventListener('pointermove',e=>{if(!drag)return;const rect=$('#battlefield').getBoundingClientRect();if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)dragMoved=true;ui.cx=Math.max(0,Math.min(g.width,drag.cx-(e.clientX-drag.x)*g.width/ui.zoom/rect.width));ui.cy=Math.max(0,Math.min(g.height,drag.cy-(e.clientY-drag.y)*g.height/ui.zoom/rect.height));});
-document.addEventListener('pointerup',()=>{drag=null;});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&started){paused=true;refresh();}});
+function cancelDrag(){drag=null;ui.dragOrder=null;}
+document.addEventListener('dragstart',e=>{if(e.target.closest('#battlefield'))e.preventDefault();});
+document.addEventListener('pointerdown',e=>{
+  dragMoved=false;
+  if(e.button!==0 || !modal.hidden || ui.inspecting || ui.spell || g.result || !e.target.closest('#battlefield'))return;
+  const node=e.target.closest('[data-node]'), from=node?Number(node.dataset.node):null;
+  if(from!==null && g.nodes[from].owner===0 && !ui.routeMode)drag={kind:'troops',from,x:e.clientX,y:e.clientY,pointer:e.pointerId};
+  else if(!node && ui.zoom>1)drag={kind:'pan',x:e.clientX,y:e.clientY,cx:ui.cx,cy:ui.cy,pointer:e.pointerId};
+});
+document.addEventListener('pointermove',e=>{
+  if(!drag || e.pointerId!==drag.pointer)return;
+  if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>5)dragMoved=true;
+  if(!dragMoved)return;
+  const svg=$('#battlefield');
+  if(!svg.hasPointerCapture(e.pointerId))svg.setPointerCapture(e.pointerId);
+  if(drag.kind==='pan'){
+    const rect=svg.getBoundingClientRect();
+    ui.cx=Math.max(0,Math.min(g.width,drag.cx-(e.clientX-drag.x)*g.width/ui.zoom/rect.width));
+    ui.cy=Math.max(0,Math.min(g.height,drag.cy-(e.clientY-drag.y)*g.height/ui.zoom/rect.height));
+  }else{
+    if(g.nodes[drag.from].owner!==0){cancelDrag();refresh();return;}
+    if(!ui.selected.has(drag.from)){clearSelection();ui.selected.add(drag.from);}
+    ui.focus=drag.from;
+    const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;
+    const point=p.matrixTransform(svg.getScreenCTM().inverse());
+    const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-node]');
+    const to=target?Number(target.dataset.node):null;
+    ui.dragOrder={from:drag.from,to:to!==null&&findPath(g,drag.from,to,0)?to:null,x:point.x,y:point.y};
+  }
+  refresh();
+});
+document.addEventListener('pointerup',e=>{
+  if(!drag || e.pointerId!==drag.pointer)return;
+  const ended=drag;cancelDrag();
+  if(dragMoved && ended.kind==='troops' && modal.hidden && !ui.spell){
+    const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-node]');
+    const to=target?Number(target.dataset.node):null;
+    if(to!==null && to!==ended.from){
+      if(!findPath(g,ended.from,to,0))toast('Reach this node through your own territory first.');
+      else if(!sendOnce(g,ended.from,to,ui.percent,0))toast('Not enough army power for a whole troop at this percentage.');
+    }
+  }
+  refresh();
+});
+document.addEventListener('pointercancel',()=>{cancelDrag();dragMoved=true;refresh();});
+window.addEventListener('blur',()=>{cancelDrag();dragMoved=true;});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&started){cancelDrag();paused=true;refresh();}});
 let last=performance.now(),accumulator=0,lastRender=0;
 function frame(now){
   const dt=Math.min(.25,(now-last)/1000);last=now;

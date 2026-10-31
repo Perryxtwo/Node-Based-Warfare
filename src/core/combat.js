@@ -12,7 +12,7 @@ export function damage(g, n, amount) {
 export function capture(g, n, owner, army) {
   const previous = n.owner;
   n.owner = owner; n.army = army; n.hp = Math.min(maxHp(n), RULES.captureHpPerTier * n.tiers.hp);
-  n.routes = []; n.effects = {}; n.lastDamage = g.time; n.goldElapsed = 0; n.troopElapsed = 0;
+  n.routes = []; n.routeCursor = 0; n.effects = {}; n.lastDamage = g.time; n.goldElapsed = 0; n.troopElapsed = 0;
   n.goldDuration = UPGRADES.gold.values[n.tiers.gold]; n.troopDuration = troopDuration(g, n);
   n.cyclePower = UPGRADES.barracks.values[n.tiers.barracks]; n.troopRunning = false;
   g.captures++; event(g, `${g.players[owner].name} captured ${n.name}.`, 'capture');

@@ -1,5 +1,5 @@
 import { random } from './random.js';
-import { BALANCE as B } from '../content/balance.js';
+import { BALANCE as B, RULES } from '../content/balance.js';
 import { UPGRADES } from '../content/upgrades.js';
 const names = ['Alderwatch', 'Briar Hollow', 'Stoneford', 'Thornfield', 'Ashen Mill', 'Oakrest', 'Windmere', 'Highfell', 'Greybridge', 'Foxglove', 'Ember Hill', 'Westhaven', 'Dawnreach', 'Ironwood', 'Mossgate', 'Redbrook', 'Kingsfall', 'Silverfen', 'Rookwell', 'Fallowmere'];
 /** Irregular grid guarantees connected, readable, bounded-degree maps. */
@@ -10,7 +10,7 @@ export function generateMap(players, perPlayer, seed) {
     id: i, label: `N${String(i + 1).padStart(2, '0')}`, name: names[i % names.length],
     x: 100 + (i % cols) * 170 + (rng() - .5) * 35, y: 110 + Math.floor(i / cols) * 160 + (rng() - .5) * 38,
     type: 'regular', owner: null, king: null, tiers: { gold: 1, barracks: 0, hp: 1 }, hp: 0, army: 0,
-    routes: [], rotation: 0, goldElapsed: 0, goldDuration: 3, troopElapsed: 0, troopDuration: 2,
+    routes: [], routeCursor: 0, goldElapsed: 0, goldDuration: UPGRADES.gold.values[1], troopElapsed: 0, troopDuration: RULES.troopSeconds,
     cyclePower: 1, troopRunning: false, lastDamage: -100, effects: {},
   }));
   const edges = [];

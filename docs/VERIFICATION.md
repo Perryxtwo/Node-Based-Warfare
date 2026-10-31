@@ -1,5 +1,17 @@
 # Verification — first draft
 
+## Controls update — 2026-10-31
+
+`npm test`: **32 passed, 0 failed**. New coverage checks one-time sends, saved percentages, whole-point rounding, the first 1-second delay, 3-second repeat cooldowns, totals above 100%, ordered waiting on zero (including the user’s 100% / 100% / 50% example), recipient edits/removal, capture cleanup, blocked paths, and identical bot timing. Production, arrivals, teleportation and gear no longer trigger immediate recurring dispatches; tests confirm that they respect the new scheduler. Existing combat, economy, spell, victory and long-bot-match checks pass.
+
+The initial browser verification attempt was blocked by a local-server timeout and unavailable Chrome access. The local server was subsequently launched outside the sandbox, and the updated game loaded successfully in the visible in-app browser. The user then playtested the game, reported that it feels much better, and approved committing the changes on 2026-10-31. This is user playtest feedback, not an automated check of every control; touch behavior remains unverified. The older browser checks below apply to the original controls.
+
+All source JavaScript passed `node --check`. UI render checks passed for all four notches, the selected notch, saved recipient percentages, upgrade controls, drag feedback, and absence of commit/countdown controls. `npm run build` successfully rebuilt `dist/index.html` with 26 modules and 33 embedded images (approximately 111 KB).
+
+## Timing update — 2026-10-31
+
+`npm test`: **21 passed, 0 failed** after changing gold tiers to 5 / 4.5 / 4 / 3.5 / 3 seconds, base troop production to 5 seconds, and ordinary edge travel to 5 seconds. Timing checks cover all five gold tiers, the initial production cycle, deferred upgrades, capture/siege behavior, travel without early arrival, and intermediate interception. The existing long bot matches also pass. Faction, spell and terrain modifiers remain in effect. The browser checks below describe the earlier draft; the new pacing still needs human playtesting.
+
 ## Reference coverage
 
 Read all five lists and all 45 cards, including two archived cards. Retrieved each card's full details. All card comment/checklist arrays were empty with no pagination remaining. Checked attachments individually on every card: none. Board custom fields: none. Six unnamed labels are unused. No additional design content was found in these fields. The description snapshot is preserved in `trello-snapshot.json`; linked readable text is in `TRELLO_REFERENCE.md`.

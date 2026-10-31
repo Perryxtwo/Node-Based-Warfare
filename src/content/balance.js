@@ -8,4 +8,5 @@ export const BALANCE = {
   illusionSeconds: 12, mineBonus: .3, gearBonus: .35, hasteSpeed: 1.4, hasteSeconds: 10,
   neutralBase: 2, neutralDistance: 2, neutralUpgrade: 2,
 };
-export const RULES = { tick: .05, troopSeconds: 2, edgeSeconds: 1.34, peaceSeconds: 5, captureHpPerTier: 3 };
+export const SEND_PERCENTAGES = [25, 50, 75, 100];
+export const RULES = { tick: .05, troopSeconds: 5, edgeSeconds: 5, orderDelay: 1, sendSeconds: 3, peaceSeconds: 5, captureHpPerTier: 3 };

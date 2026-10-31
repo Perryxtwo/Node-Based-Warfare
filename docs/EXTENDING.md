@@ -28,7 +28,8 @@ The loop accumulates elapsed foreground time into 50 ms ticks. It caps long fram
 | `map.zoom.in`, `map.zoom.out`, `map.zoom.reset` | View controls |
 | `node.stat.army`, `node.stat.hp` | Inspector stats |
 | `node.upgrade.gold`, `.barracks`, `.hp` | Upgrade components |
-| `orders.commit`, `orders.clear`, `orders.touch` | Army orders |
+| `orders.percentage`, `orders.percentage.25`, `.50`, `.75`, `.100` | Army percentage meter and notches |
+| `orders.clear`, `orders.touch`, `node.upgrades` | Recurring orders and selected-node upgrade menu |
 | `spell.<spell-id>` | Research/hand card |
 | `magic.choose-targets`, `magic.cast`, `magic.cancel` | Spell controls |
 | `tools.guide`, `tools.art`, `tools.inspect` | Utilities |
@@ -37,6 +38,8 @@ The loop accumulates elapsed foreground time into 50 ms ticks. It caps long fram
 
 ## Resolving remaining design gaps
 
-Balance values labeled WIP in Trello are not final design decisions. Review them through playtesting. Research uses the highest available eligible tiers, with one job per node. Leyline is allowed to add a fifth edge: the four-edge cap is applied to generated maps, not magic. Terrain speed penalties use the slower endpoint once. A fractional amount of army power created by a spell stays at its source until it accumulates to a whole point; routes divide integer power fairly. Neutral guard strength is based on graph-like distance and starting upgrades.
+Balance values labeled WIP in Trello are not final design decisions. Review them through playtesting. Research uses the highest available eligible tiers, with one job per node. Leyline is allowed to add a fifth edge: the four-edge cap is applied to generated maps, not magic. Terrain speed penalties use the slower endpoint once. Army sends use `floor(current army × saved percentage / 100)`; fractional power stays at the source. Neutral guard strength is based on graph-like distance and starting upgrades.
+
+Recurring orders live in `node.routes` as `{ to, percent, nextSend }`, with `routeCursor` tracking the next recipient. `commitRoutes` preserves existing clocks while adding new recipients with `RULES.orderDelay` (1 second); numeric recipient IDs default to 100% for bots. `ordersStep` serves due recipients in selection order after production, arrivals and spell effects, and sets a successful recipient’s next request to `game.time + RULES.sendSeconds` (3 seconds). A zero request holds the cursor and retries each simulation tick. Recipients whose clocks have not elapsed or whose paths are temporarily blocked are skipped until eligible again. Capture clears all orders. Manual `sendOnce` dispatches immediately without creating a route or changing these clocks; a manual amount below one sends nothing. All timers use simulation time and are hidden in the UI.
 
 On Conquest elimination, remaining territory and moving armies transfer to the captor. This is an explicit draft rule because Trello does not describe the aftermath of losing a king. Domination requires every node including neutrals, following its Trello card. A destructive spell does not capture territory; capture requires an arriving army with surplus power. These decisions should be revisited if the board changes.

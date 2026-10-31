@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createGame } from '../src/core/state.js';
 import { step } from '../src/core/engine.js';
 import { neighbors, maxHp, upgradeCost, owned } from '../src/core/selectors.js';
-import { commitRoutes, findPath, dispatch } from '../src/core/routing.js';
+import { commitRoutes, findPath, sendOnce } from '../src/core/routing.js';
 import { damage, arrive, capture, checkVictory } from '../src/core/combat.js';
 import { upgrade } from '../src/core/economy.js';
 import { research, cast, validTargets } from '../src/core/spells.js';
@@ -27,16 +27,23 @@ test('all supported map sizes/seeds are connected, bounded and correctly populat
 });
 test('map is deterministic',()=>assert.deepEqual(game(),game()));
 test('vacant nodes never earn, train or regenerate',()=>{const g=game(),n=g.nodes.find(n=>n.owner===null),army=n.army;advance(g,30);assert.equal(n.army,army);assert.equal(n.hp,0);});
-test('gold upgrades wait until current cycle finishes; king price exact',()=>{const g=game(),n=king(g);advance(g,1);const cost=upgradeCost(g,n,'gold');assert.equal(cost,2.3);assert(upgrade(g,n.id,'gold',0));const balance=g.players[0].gold;advance(g,1.95);assert.equal(g.players[0].gold,balance);advance(g,.05);assert.equal(g.players[0].gold,balance+1);advance(g,2.5);assert.equal(g.players[0].gold,balance+2);});
-test('barracks upgrade finishes old power cycle first',()=>{const g=game(),n=king(g);advance(g,1);assert(upgrade(g,n.id,'barracks',0));advance(g,1);assert.equal(n.army,9);advance(g,2);assert.equal(n.army,12);});
+test('gold upgrades wait until current cycle finishes; king price exact',()=>{const g=game(),n=king(g);advance(g,1);const cost=upgradeCost(g,n,'gold');assert.equal(cost,2.3);assert(upgrade(g,n.id,'gold',0));const balance=g.players[0].gold;advance(g,3.95);assert.equal(g.players[0].gold,balance);advance(g,.05);assert.equal(g.players[0].gold,balance+1);advance(g,4.5);assert.equal(g.players[0].gold,balance+2);});
+test('gold tiers produce one gold every 5, 4.5, 4, 3.5 and 3 seconds',()=>{
+  for(const [tier,seconds] of [[1,5],[2,4.5],[3,4],[4,3.5],[5,3]]){
+    const g=game(),n=king(g);n.tiers.gold=tier;
+    advance(g,5);const balance=g.players[0].gold;
+    advance(g,seconds-.05);assert.equal(g.players[0].gold,balance,`T${tier} must not pay early`);
+    advance(g,.05);assert.equal(g.players[0].gold,balance+1,`T${tier} pays at ${seconds}s`);
+  }
+});
+test('barracks upgrade finishes old five-second power cycle first',()=>{const g=game(),n=king(g);advance(g,1);assert(upgrade(g,n.id,'barracks',0));advance(g,3.95);assert.equal(n.army,8);advance(g,.05);assert.equal(n.army,9);advance(g,5);assert.equal(n.army,12);});
 test('king discount and dwarf tier five exception',()=>{const g=labGame('dwarves'),n=g.nodes.find(n=>n.owner===null);capture(g,n,0,5);n.tiers.barracks=4;assert(upgrade(g,n.id,'barracks',0));g.players[0].faction='elves';n.tiers.barracks=4;assert.equal(upgrade(g,n.id,'barracks',0),false);});
 test('combat consumes army then HP; exact tie does not capture',()=>{const g=game(),n=g.nodes.find(n=>n.owner===null);n.army=5;n.hp=3;arrive(g,n,0,8);assert.equal(n.owner,null);assert.equal(n.army,0);assert.equal(n.hp,0);arrive(g,n,0,2);assert.equal(n.owner,0);assert.equal(n.army,2);assert.equal(n.hp,Math.min(maxHp(n),3*n.tiers.hp));});
-test('capture retains tiers and restarts production',()=>{const g=game(),n=g.nodes.find(n=>n.owner===null);n.tiers={gold:3,barracks:2,hp:4};n.goldElapsed=1.2;capture(g,n,0,7);assert.deepEqual(n.tiers,{gold:3,barracks:2,hp:4});assert.equal(n.hp,12);assert.equal(n.goldElapsed,0);assert.equal(n.troopRunning,false);advance(g,4.9);assert.equal(n.army,7);advance(g,2.1);assert.equal(n.army,10);});
-test('siege finishes in-flight troop then halts; research pauses immediately',()=>{const g=labGame(),n=king(g);n.tiers.barracks=2;research(g,0,'regrowth');advance(g,1);damage(g,n,1);advance(g,1);assert.equal(n.army,8);const elapsed=g.players[0].research[0].elapsed;advance(g,3.9);assert.equal(n.army,8);assert.equal(g.players[0].research[0].elapsed,elapsed);advance(g,.2);assert(g.players[0].research[0].elapsed>elapsed);});
+test('capture retains tiers and restarts production',()=>{const g=game(),n=g.nodes.find(n=>n.owner===null);n.tiers={gold:3,barracks:2,hp:4};n.goldElapsed=1.2;capture(g,n,0,7);assert.deepEqual(n.tiers,{gold:3,barracks:2,hp:4});assert.equal(n.hp,12);assert.equal(n.goldElapsed,0);assert.equal(n.troopRunning,false);advance(g,9.9);assert.equal(n.army,7);advance(g,.1);assert.equal(n.army,10);});
+test('siege finishes in-flight troop then halts; research pauses immediately',()=>{const g=labGame(),n=king(g);n.tiers.barracks=2;research(g,0,'regrowth');advance(g,1);damage(g,n,1);advance(g,3.95);assert.equal(n.army,7);const elapsed=g.players[0].research[0].elapsed;advance(g,.05);assert.equal(n.army,8);advance(g,.9);assert.equal(n.army,8);assert.equal(g.players[0].research[0].elapsed,elapsed);advance(g,.2);assert(g.players[0].research[0].elapsed>elapsed);});
 test('shortest paths cannot pass through hostile nodes',()=>{const g=game(),n=king(g),near=neighbors(g,n.id)[0];const far=neighbors(g,near).find(i=>i!==n.id&&!neighbors(g,n.id).includes(i));assert.equal(findPath(g,n.id,far,0),null);capture(g,g.nodes[near],0,1);assert(findPath(g,n.id,far,0));});
-test('routing sends current army; integer remainder alternates',()=>{const g=game(),n=king(g),dest=neighbors(g,n.id).slice(0,3);n.army=5;commitRoutes(g,n.id,dest,0);assert.equal(n.army,0);const first=g.waves.map(w=>w.power);g.waves=[];n.army=5;dispatch(g,n);const second=g.waves.map(w=>w.power);assert.equal(first.reduce((a,b)=>a+b),5);assert.equal(second.reduce((a,b)=>a+b),5);assert.notDeepEqual(first,second);});
-test('one ordinary edge takes 1.34 seconds, never arrives early',()=>{const g=game(),n=king(g),dest=g.nodes[neighbors(g,n.id)[0]];dest.type='regular';dest.army=0;n.army=8;commitRoutes(g,n.id,[dest.id],0);advance(g,1.3);assert.equal(dest.owner,null);advance(g,.05);assert.equal(dest.owner,0);});
-test('captured intermediate node intercepts an army',()=>{const g=game(),n=king(g),middle=g.nodes[neighbors(g,n.id)[0]],end=g.nodes[neighbors(g,middle.id).find(i=>i!==n.id&&!neighbors(g,n.id).includes(i))];capture(g,middle,0,0);middle.type='regular';commitRoutes(g,n.id,[end.id],0);middle.owner=1;middle.army=100;advance(g,1.35);assert.equal(g.waves.length,0);assert.equal(end.owner,null);});
+test('one ordinary edge takes five seconds, never arrives early',()=>{const g=game(),n=king(g),dest=g.nodes[neighbors(g,n.id)[0]];dest.type='regular';dest.army=0;n.army=8;sendOnce(g,n.id,dest.id,100,0);advance(g,4.95);assert.equal(dest.owner,null);advance(g,.05);assert.equal(dest.owner,0);});
+test('captured intermediate node intercepts an army',()=>{const g=game(),n=king(g),middle=g.nodes[neighbors(g,n.id)[0]],end=g.nodes[neighbors(g,middle.id).find(i=>i!==n.id&&!neighbors(g,n.id).includes(i))];capture(g,middle,0,0);middle.type='regular';n.tiers.barracks=0;n.troopRunning=false;sendOnce(g,n.id,end.id,100,0);middle.owner=1;middle.army=100;advance(g,5);assert.equal(g.waves.length,0);assert.equal(end.owner,null);});
 test('research cannot duplicate queued or held cards, consumes gold, and completes',()=>{const g=labGame();assert(research(g,0,'regrowth'));assert.equal(research(g,0,'regrowth'),false);advance(g,7.5);assert(g.players[0].hand.includes('regrowth'));assert.equal(research(g,0,'regrowth'),false);assert(cast(g,0,'regrowth',[king(g).id]));assert(research(g,0,'regrowth'));});
 test('capture cancels research if no eligible laboratory remains',()=>{const g=labGame();research(g,0,'regrowth');g.nodes.find(n=>n.king===0).owner=1;advance(g,.05);assert.equal(g.players[0].research.length,0);});
 test('neutral and duplicate spell targets are forbidden',()=>{const g=labGame(),n=g.nodes.find(n=>n.owner===null);assert.equal(validTargets(g,0,'devastation',[n.id]),false);assert.equal(validTargets(g,0,'teleport',[king(g).id,king(g).id]),false);});

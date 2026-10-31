@@ -33,7 +33,7 @@ function act(g, p, d) {
   if (d.foresight && incoming.length) {
     const target = g.nodes[incoming[0].path.at(-1)];
     const donor = ns.filter(n => n !== target && n.army > 4 && findPath(g, n.id, target.id, p.id)).sort((a, b) => b.army - a.army)[0];
-    if (donor && !donor.routes.includes(target.id)) return commitRoutes(g, donor.id, [target.id], p.id);
+    if (donor && !donor.routes.some(r => r.to === target.id)) return commitRoutes(g, donor.id, [target.id], p.id);
   }
   const frontier = g.nodes.filter(n => n.owner !== p.id && neighbors(g, n.id).some(i => g.nodes[i].owner === p.id));
   const force = ns.reduce((a, n) => a + n.army, 0);
@@ -42,7 +42,7 @@ function act(g, p, d) {
   })).sort((a, b) => a.score - b.score);
   const target = targets.find(t => force > t.cost * d.caution + 2);
   if (target) {
-    const donor = [...ns].sort((a, b) => b.army - a.army).find(n => n.army >= 2 && !n.routes.includes(target.n.id) && findPath(g, n.id, target.n.id, p.id));
+    const donor = [...ns].sort((a, b) => b.army - a.army).find(n => n.army >= 2 && !n.routes.some(r => r.to === target.n.id) && findPath(g, n.id, target.n.id, p.id));
     if (donor) return commitRoutes(g, donor.id, [target.n.id], p.id);
   }
   // Faction biases are explicit and editable, not hidden resource bonuses.

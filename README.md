@@ -20,9 +20,13 @@ npm test
 
 ## How to play
 
-Choose Conquest or Domination, your faction, 1–4 independent rivals, their factions/difficulties, a map size and seed. Left-click your node; Shift-click for multiple sources. Right-click recipients. Click empty ground or press Enter to commit. Existing troops leave immediately and future troops follow. Right-click a selected friendly node for upgrades, or use the command panel. Space pauses. Zoom and drag empty land to pan. Touch players can use the tap-to-route mode and Commit orders.
+Choose Conquest or Domination, your faction, 1–4 independent rivals, their factions/difficulties, a map size and seed. Set the army meter to 25%, 50%, 75% or 100% using the mouse wheel over the map, ↑ / ↓, or a notch button. Drag from your node to a reachable node to send that percentage once. Left-click your node to select it and open upgrades on the right; Shift-click for multiple sources. Right-click destinations to toggle recurring recipients, saving the current percentage for each. Space pauses. Zoom and drag empty land to pan. Touch players can drag to send once or enable tap-to-route for recurring orders.
+
+Recurring recipients become ready after 1 second and request again 3 seconds after each successful send. Due recipients take turns in selection order, each receiving its saved percentage of the army available at that instant, rounded down. A request that rounds to zero holds its turn until a whole point can be sent. Total percentages may exceed 100%. Deselecting never commits or cancels orders; right-click a recipient again to remove it, or use Clear routes. The meter affects new orders; remove and re-add a recipient to change its percentage. There are no visible send countdowns.
 
 Upgrade barracks to unlock spell research. Ready cards open a preview; choose targets and confirm. Left-click friendly spell targets and right-click enemy spell targets. Vacant nodes cannot be targeted. Field guide and Art workshop pause the match; Resume continues it. Reloading starts a fresh campaign; match saving is not included yet.
+
+Gold tiers T1–T5 produce 1 gold every 5 / 4.5 / 4 / 3.5 / 3 seconds. Troop production has a 5-second base cycle, and ordinary node-to-node movement takes 5 seconds. Existing faction, spell and terrain modifiers apply to these base timings.
 
 ## Change the game
 

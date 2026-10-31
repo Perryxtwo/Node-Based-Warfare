@@ -3,7 +3,6 @@ import { BALANCE as B } from '../content/balance.js';
 import { owned, atPeace, faction, maxHp } from './selectors.js';
 import { upgrade } from './economy.js';
 import { damage } from './combat.js';
-import { dispatch } from './routing.js';
 import { event } from './state.js';
 export function eligibleLabs(g, p, spell) { return owned(g, p).filter(n => n.tiers.barracks >= spell.tier); }
 export function research(g, p, id) {
@@ -36,7 +35,7 @@ export function validTargets(g, p, id, ids) {
 }
 /** Each effect is isolated. New spells supply a definition and one handler. */
 export const EFFECTS = {
-  teleport(g, p, [a, b]) { const amount = Math.floor(a.army / 2); a.army -= amount; b.army += amount; dispatch(g, b); },
+  teleport(g, p, [a, b]) { const amount = Math.floor(a.army / 2); a.army -= amount; b.army += amount; },
   regrowth(g, p, [n]) { n.hp = Math.min(maxHp(n), n.hp + maxHp(n) / 2); },
   leyline(g, p, [a, b]) { if (!g.edges.some(([x, y]) => x === a.id && y === b.id || x === b.id && y === a.id)) g.edges.push([a.id, b.id]); },
   illusion(g, p, ns) { ns.forEach(n => n.effects.hidden = g.time + B.illusionSeconds); },
@@ -44,7 +43,7 @@ export const EFFECTS = {
   mines(g, p) { g.players[p].gold *= 1 + B.mineBonus; },
   bastion(g, p, [n]) { for (const key of ['hp', 'gold']) if (!upgrade(g, n.id, key, p, true)) n.army += 10; },
   defense(g, p, [n]) { n.effects.shield = g.time + 5; },
-  gear(g, p, ns) { ns.forEach(n => { n.army *= 1 + B.gearBonus; dispatch(g, n); }); },
+  gear(g, p, ns) { ns.forEach(n => { n.army *= 1 + B.gearBonus; }); },
   catapult(g, p, ns) { const source = ns.find(n => n.owner === p), amount = source.army / 4; ns.forEach(n => damage(g, n, amount)); },
   treasures(g, p, [n]) { n.effects.theft = { owner: p, until: g.time + 10 }; },
   heat(g, p, ns) { ns.forEach(n => n.effects.haste = { factor: B.hasteSpeed, until: g.time + B.hasteSeconds }); },
